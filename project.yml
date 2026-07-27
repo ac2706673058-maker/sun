@@ -1,0 +1,35 @@
+# XcodeGen 备用工程描述（若手写的 ChengYue.xcodeproj 与你的 Xcode 版本不兼容，
+# 执行 `xcodegen generate` 即可重新生成一份等价工程）。
+name: ChengYue
+options:
+  bundleIdPrefix: com.chengyue
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: zh-Hans
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  ChengYue:
+    type: application
+    platform: iOS
+    sources:
+      - path: ChengYue
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chengyue.reader
+        PRODUCT_NAME: ChengYue
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleDisplayName: "橙阅"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
