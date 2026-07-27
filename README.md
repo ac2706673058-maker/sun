@@ -103,3 +103,20 @@ ChengYue/
 - 未接入书源，书城/搜索的数据全部来自 `SampleLibrary`；接真实书源时只需替换 `LibraryStore.books` 的来源，分页与阅读层无需改动
 - 9 本陈列用样例书的正文由模板生成，章末已注明；3 本主推书籍为完整撰写内容
 - 工程未在 Xcode 中实际编译过（开发环境无 macOS/Xcode 工具链），首次打开若有编译问题请以 Xcode 报错为准
+
+---
+
+## 网页版（可直接在手机上用）
+
+`web/` 下是同一套阅读体验的 Web 实现，单文件、离线可用、无任何外部请求：
+
+```bash
+python3 web/build.py     # 从 ChengYue/Content/*.swift 抽取正文，生成 web/index.html
+```
+
+- 用 Safari 打开后「分享 → 添加到主屏幕」，即以全屏 App 形式运行（自带图标与 manifest）
+- 分页用 CSS 多列实现真分页，页码/进度/划线坐标都基于 Range 量测，不是滚动模拟
+- 长按取词用 `Intl.Segmenter` 做中文分词，选区手柄、划线三态、想法批注与原生版一致
+- 五种翻页：覆盖 / 仿真（3D 翻卷）/ 平移 / 无动画 / 上下滚动，前三种跟手且可中途反悔
+- 听书用 Web Speech API，`onboundary` 驱动跟读高亮与自动翻页
+- 阅读进度、划线、书签、时长统计存在浏览器 localStorage 里
