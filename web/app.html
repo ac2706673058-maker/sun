@@ -4,7 +4,12 @@
 html,body{margin:0;padding:0;height:100%;overscroll-behavior:none}
 body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
   background:var(--pageBg);color:var(--txt);-webkit-font-smoothing:antialiased}
-#app{position:fixed;inset:0;overflow:hidden}
+#app{position:fixed;inset:0;overflow:hidden;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea{-webkit-user-select:auto;user-select:auto}
+#statusScrim{position:absolute;left:0;right:0;top:0;height:var(--safeT);z-index:100;pointer-events:none;
+  opacity:0;transition:opacity .2s;
+  background:linear-gradient(to bottom,rgba(0,0,0,.34),rgba(0,0,0,.14) 60%,transparent)}
 .hidden{display:none!important}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 svg{fill:none;stroke:currentColor;stroke-width:1.7;vertical-align:middle}
@@ -148,7 +153,8 @@ body{background:var(--pageBg);color:var(--txt)}
 .hl .spoken{position:absolute;background:rgba(255,106,43,.16);border-radius:4px}
 .rHead,.rFoot{position:absolute;left:0;right:0;display:flex;align-items:center;gap:8px;
   font-size:11px;color:var(--rsub);pointer-events:none;font-variant-numeric:tabular-nums}
-.rHead{top:calc(var(--safeT) + 4px);height:18px}
+.rHead{top:calc(var(--safeT) + 6px);height:18px}
+.standalone .rHead{top:calc(var(--safeT) + 2px)}
 .rFoot{bottom:calc(var(--safeB) + 4px);height:16px}
 .rHead .l{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .rFoot .sp{flex:1}
@@ -358,7 +364,7 @@ const HL_STYLES = [{ id:0, n:'背景' }, { id:1, n:'波浪线' }, { id:2, n:'直
 const DEFAULT_CFG = {
   fs:19, font:'pf', lh:1.62, ps:13, ls:.2, mx:22, my:12, bold:false, indent:true, justify:true,
   theme:'paper', autoDark:true, nightTheme:'night', dim:0, warm:0, mode:'cover',
-  tap:'lr', haptic:true, full:true, header:true, footer:true, clock:true, pct:true, chpage:true,
+  tap:'lr', haptic:true, full:true, header:true, footer:true, clock:true, pct:true, chpage:true, columns:0,
   autoMode:'page', autoSpeed:.5, rate:.5, voice:'', rest:0, goal:30
 };
 
@@ -437,6 +443,7 @@ function renderTabs() {
 }
 function switchTab(k) {
   TAB = k; sub.close();
+  if (window.updateStandalone) updateStandalone();
   ['shelf', 'store', 'me'].forEach(x => $('#scr-' + x).classList.toggle('hidden', x !== k));
   renderTabs();
   ({ shelf:renderShelf, store:renderStore, me:renderMe })[k]();
@@ -564,6 +571,7 @@ function renderMe() {
       <div class="card" style="margin:0 16px">
         <div class="settingRow" data-act="prefs">${svg('aa', 18)}<span class="k">阅读偏好</span><span class="v">字体 · 主题 · 翻页</span>›</div>
         <div class="settingRow" data-act="notes">${svg('pen', 18)}<span class="k">我的划线与书签</span><span class="v">${DB.hls.length + DB.marks.length} 条</span>›</div>
+        <div class="settingRow" data-act="backup">${svg('copy', 18)}<span class="k">备份与恢复</span><span class="v">导出 / 导入记录</span>›</div>
         <div class="settingRow" data-act="a2hs">${svg('more', 18)}<span class="k">添加到主屏幕</span><span class="v">像 App 一样打开</span>›</div>
         <div class="settingRow" data-act="about">${svg('more', 18)}<span class="k">关于橙阅</span><span class="v">v1.0</span>›</div>
       </div>
@@ -658,6 +666,47 @@ function openNotes() {
         ${DB.marks.filter(m => m.b === id).map(m => `<div class="muted" style="margin-top:10px;font-size:13px">🔖 ${esc(m.ct)}</div>`).join('')}</div>`;
       }).join('')}</div>`);
 }
+function exportData() {
+  const payload = { app:'chengyue', v:1, at:new Date().toISOString(),
+    cfg, shelf:DB.shelf, prog:DB.prog, marks:DB.marks, hls:DB.hls, sess:DB.sess, hist:DB.hist };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 1)], { type:'application/json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = '橙阅备份-' + today() + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast('备份已导出');
+}
+function importData(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (d.app !== 'chengyue') throw 0;
+      Object.assign(cfg, DEFAULT_CFG, d.cfg || {});
+      DB.shelf = d.shelf || []; DB.prog = d.prog || {}; DB.marks = d.marks || [];
+      DB.hls = d.hls || []; DB.sess = d.sess || {}; DB.hist = d.hist || [];
+      DB.save(); renderMe(); toast('已恢复备份');
+    } catch (e) { toast('文件格式不对'); }
+  };
+  r.readAsText(file);
+}
+function openBackup() {
+  sub.open(`<div class="navbar" style="padding-bottom:8px"><button class="act" data-act="closeSub">‹ 返回</button>
+      <h1 style="font-size:17px;text-align:center;margin-right:44px">备份与恢复</h1></div>
+    <div class="scroller" style="padding:16px">
+      <p class="muted" style="font-size:13px;line-height:1.7;margin-top:0">
+        阅读进度、划线、书签和时长都存在这台设备的浏览器里。清理浏览器数据、长期不打开、
+        或者换手机，这些记录都会丢。建议偶尔导出一份备份存到「文件」App。</p>
+      <div class="card" style="margin-top:6px">
+        <div class="settingRow" data-act="exportData">${svg('copy', 18)}<span class="k">导出备份</span><span class="v">存成 JSON 文件</span>›</div>
+        <div class="settingRow" data-act="importData">${svg('pen', 18)}<span class="k">从备份恢复</span><span class="v">选择 JSON 文件</span>›</div>
+      </div>
+      <input type="file" id="impFile" accept="application/json,.json" style="display:none">
+    </div>`, () => {
+    $('#impFile').addEventListener('change', e => { if (e.target.files[0]) importData(e.target.files[0]); });
+  });
+}
+
 function openAbout() {
   sub.open(`<div class="navbar" style="padding-bottom:8px"><button class="act" data-act="closeSub">‹ 返回</button>
       <h1 style="font-size:17px;text-align:center;margin-right:44px">关于</h1></div>
@@ -666,9 +715,14 @@ function openAbout() {
         display:grid;place-items:center;color:#fff;font:700 42px/1 'Songti SC',serif">橙</div>
       <div style="font-size:20px;font-weight:700;margin-top:14px">橙阅</div>
       <div class="muted" style="font-size:12px;margin-top:4px">v1.0 · 本地样例书库</div>
-      <p class="muted" style="font-size:13px;line-height:1.7;padding:16px 34px">
-        一个把阅读体验做到极致的小说阅读器。<br>当前版本未接入任何书源，书库为内置样例内容。<br>
-        所有阅读进度、划线、书签都保存在本机浏览器里。</p></div>`);
+      <p class="muted" style="font-size:13px;line-height:1.7;padding:16px 30px;text-align:left">
+        一个把阅读体验做到极致的小说阅读器。当前版本未接入任何书源，书库为内置样例内容。<br><br>
+        <b style="color:var(--txt)">关于联网：</b>整个应用（正文、字体、图标、语音）没有任何一次外部请求，
+        打开之后翻页、听书、划线全程不用网。唯一需要网络的时刻是<b style="color:var(--txt)">从主屏幕图标启动、
+        把页面本身取回来的那一下</b>；网页版没法像原生 App 那样把自己装进手机。想彻底断网可用，
+        用仓库里的 Xcode 工程装原生版。<br><br>
+        <b style="color:var(--txt)">关于数据：</b>阅读进度、划线、书签都存在本机浏览器，
+        可以在「我的 → 备份与恢复」导出一份留底。</p></div>`);
 }
 
 /* =======================================================================
@@ -750,6 +804,7 @@ function closeReader(force) {
   recordRead(R.secs % 30, R.book.id);
   window.removeEventListener('resize', onResize);
   $('#reader').classList.add('hidden'); $('#reader').innerHTML = '';
+  updateStandalone();
   $('#tabbar').classList.remove('hidden');
   ({ shelf:renderShelf, store:renderStore, me:renderMe })[TAB]();
 }
@@ -790,8 +845,9 @@ function applyTheme() {
   [R.front, R.back].forEach(p => p && p.classList.toggle('grain', t.grain));
   $('#warm') && ($('#warm').style.opacity = cfg.warm * .38);
   $('#dim') && ($('#dim').style.opacity = cfg.dim * .62);
-  const meta = document.querySelector('meta[name=theme-color]');
+  const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = t.bg;
+  updateStandalone();
 }
 function applyType() {
   const rd = $('#reader'), f = FONTS.find(x => x.id === cfg.font) || FONTS[0];
@@ -815,18 +871,23 @@ function layout() {
   const safeB = parseFloat(st.getPropertyValue('--safeB')) || 0;
   const top = safeT + (cfg.header ? 26 : 8) + cfg.my;
   const bot = safeB + (cfg.footer ? 24 : 8) + cfg.my * .8;
-  GEO = { w:W - cfg.mx * 2, h:H - top - bot, gap:0, top, bot };
+  const pageW = W - cfg.mx * 2;
+  // 宽屏（横屏 / iPad）自动分成两栏，一屏两页，像摊开的书
+  const twoCol = cfg.columns === 2 || (cfg.columns === 0 && pageW > 620);
+  const innerGap = twoCol ? 30 : 0;
+  const colW = twoCol ? (pageW - innerGap) / 2 : pageW;
+  GEO = { w:pageW, h:H - top - bot, gap:innerGap, top, bot, twoCol };
   [R.front, R.back].forEach(p => {
     const { inner, flow } = paneParts(p);
     inner.style.left = cfg.mx + 'px'; inner.style.right = cfg.mx + 'px';
     inner.style.top = top + 'px'; inner.style.bottom = bot + 'px';
-    flow.style.columnWidth = GEO.w + 'px'; flow.style.columnGap = GEO.gap + 'px';
-    flow.style.width = GEO.w + 'px';
+    flow.style.columnWidth = colW + 'px'; flow.style.columnGap = innerGap + 'px';
+    flow.style.width = pageW + 'px';
   });
   const scroll = cfg.mode === 'scroll';
   const ff = paneParts(R.front).flow;
   ff.style.overflowY = scroll ? 'auto' : 'hidden';
-  ff.style.columnWidth = scroll ? 'auto' : GEO.w + 'px';
+  if (scroll) { ff.style.columnWidth = 'auto'; ff.style.columnGap = '0px'; }
   // 备用页用 visibility 隐藏而不是 display:none —— 隐藏但保留布局，才能提前量出目标章的页数
   R.back.style.visibility = 'hidden';
   R.front.style.visibility = 'visible';
@@ -1472,18 +1533,33 @@ function panelBright() {
     <p style="font-size:11px;color:var(--rsm);margin:0 0 12px">网页无法直接改系统亮度，这里用一层可调暗色覆盖正文；暖光滤镜按乘法混合叠在文字之上，夜里读比单纯调暗更护眼。</p>`;
 }
 function panelSpeech() {
-  const vs = speechVoices();
+  const vs = rankedVoices();
+  const cur = pickVoice();
+  const best = vs.length ? voiceQuality(vs[0]) : '';
   return `<div class="pRow" style="align-items:center">
       <button data-act="speakToggle" style="font-size:38px;line-height:1;color:var(--accent)">${SP.on ? '⏸' : '▶'}</button>
       <div style="flex:1"><div style="font-size:14px;font-weight:500">${SP.on ? '正在朗读' : '点击开始朗读'}</div>
-      <div style="font-size:11px;color:var(--rsm);margin-top:3px">${SP.timer ? '将在 ' + Math.ceil(SP.left / 60) + ' 分钟后停止' : '从当前页继续，读完自动进入下一章'}</div></div>
+      <div style="font-size:11px;color:var(--rsm);margin-top:3px">${SP.timer ? '将在 ' + Math.ceil(SP.left / 60) + ' 分钟后停止' : '逐句朗读，读完自动进入下一章'}</div></div>
       ${SP.on ? '<button data-act="speakStop" style="font-size:13px;color:var(--rsm)">停止</button>' : ''}</div>
     <div class="pRow"><span>语速</span><input class="rng" type="range" min="0" max="1" step="0.05" value="${cfg.rate}" data-rng="rate">
-      <span style="width:38px;text-align:right;font-size:12px">${(.5 + cfg.rate * 1.5).toFixed(1)}x</span></div>
-    ${vs.length ? `<div class="pRow"><span>音色</span><select data-sel="voice" style="flex:1;padding:8px;border-radius:8px;border:0;background:var(--rctrl);color:inherit;font-size:13px">
-      ${vs.map(v => `<option value="${esc(v.name)}" ${cfg.voice === v.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>` :
-      '<p style="font-size:11px;color:var(--rsm)">当前浏览器没有可用的中文语音。</p>'}
-    ${segRow('定时', 'sleep', [{ v:0, n:'不限' }, { v:15, n:'15分' }, { v:30, n:'30分' }, { v:60, n:'60分' }], SP.timer || 0)}`;
+      <span style="width:38px;text-align:right;font-size:12px">${speechRate().toFixed(2)}x</span></div>
+    ${vs.length ? `<div class="pRow"><span>音色</span>
+      <select data-sel="voice" style="flex:1;min-width:0;padding:8px;border-radius:8px;border:0;background:var(--rctrl);color:inherit;font-size:13px">
+        ${vs.map(v => `<option value="${esc(v.name)}" ${cur && cur.name === v.name ? 'selected' : ''}>${esc(v.name)}${voiceQuality(v) ? '（' + voiceQuality(v) + '）' : ''}</option>`).join('')}
+      </select>
+      <button data-act="previewVoice" style="font-size:12px;color:var(--accent);padding:0 4px">试听</button></div>`
+      : '<p style="font-size:11px;color:var(--rsm)">系统里还没有中文语音。</p>'}
+    ${segRow('定时', 'sleep', [{ v:0, n:'不限' }, { v:15, n:'15分' }, { v:30, n:'30分' }, { v:60, n:'60分' }], SP.timer || 0)}
+    <div style="background:var(--rctrl);border-radius:10px;padding:11px 12px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:5px">${best ? '已在用「' + best + '」音色' : '想要更像真人的声音？'}</div>
+      <div style="font-size:11px;line-height:1.65;color:var(--rsm)">
+        ${best ? '这已经是这台设备上音质最好的中文语音了。想换别的，按下面的路径再下载即可。'
+          : (vs.length ? '当前只有系统自带的紧凑版语音，听起来偏机械。iPhone 里有音质接近真人的版本，下载后完全离线可用：'
+                       : '这台设备还没有中文语音。按下面的路径下载一个，下载后完全离线可用：')}
+        <br><b style="color:var(--rst)">设置 → 辅助功能 → 朗读内容 → 声音 → 中文 → 简体中文</b>
+        <br>选一个带「高级」或「增强」的音色下载（婷婷 / 李牧 / 思悦），回到这里在「音色」里选它。
+      </div>
+    </div>`;
 }
 function panelAuto() {
   return `${segRow('方式', 'autoMode', [{ v:'page', n:'定时翻页' }, { v:'scroll', n:'平滑滚动' }], cfg.autoMode)}
@@ -1503,7 +1579,9 @@ function panelMore() {
       <button data-act="bookmark" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;font-size:11px;color:${marked ? 'var(--accent)' : 'inherit'}">${svg('mark', 20)}${marked ? '取消书签' : '加书签'}</button>
       <button data-panel="auto" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;font-size:11px">${svg('play', 20)}自动阅读</button>
       <button data-panel="catalog" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;font-size:11px">${svg('list', 20)}目录</button>
+      <button data-act="bookSearch" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;font-size:11px">${svg('search', 20)}搜全书</button>
     </div>
+    ${segRow('分栏', 'columns', [{ v:0, n:'自动' }, { v:1, n:'单栏' }, { v:2, n:'双栏' }], cfg.columns)}
     ${segRow('点击', 'tap', [{ v:'lr', n:'左右翻页' }, { v:'next', n:'全屏下一页' }, { v:'menu', n:'仅手势' }], cfg.tap)}
     ${tog('full', '沉浸全屏', '隐藏浏览器界面栏')}
     ${tog('haptic', '触感反馈', '部分设备不支持')}
@@ -1562,6 +1640,49 @@ function drawCatalog() {
       : '<div class="empty">还没有划线<br><span style="font-size:12px">长按正文即可划线、写想法</span></div>';
   }
 }
+function openBookSearch() {
+  closeMenu();
+  const sh = el('div', 'sheet');
+  sh.innerHTML = `<div class="sbg"></div><div class="sbody">
+    <div class="shead">
+      <input id="bq" placeholder="搜索本书正文" autocomplete="off"
+        style="flex:1;min-width:0;padding:9px 12px;border-radius:9px;border:0;background:var(--rctrl);color:inherit;font-size:14px;outline:none">
+      <button data-close style="font-size:13px;color:var(--rsm)">关闭</button></div>
+    <div class="slist" id="bres"></div></div>`;
+  $('#reader').appendChild(sh);
+  const input = sh.querySelector('#bq'), box = sh.querySelector('#bres');
+  const run = () => {
+    const q = input.value.trim();
+    if (!q) { box.innerHTML = '<div class="empty">输入关键词，搜索这本书的全部正文</div>'; return; }
+    const hits = [];
+    R.book.chapters.forEach((c, ci) => {
+      let i = c.text.indexOf(q);
+      while (i >= 0 && hits.length < 300) {
+        const a = Math.max(0, i - 14), b = Math.min(c.text.length, i + q.length + 26);
+        hits.push({ ci, off:i,
+          pre:c.text.slice(a, i).replace(/\n/g, ' '),
+          hit:c.text.slice(i, i + q.length),
+          post:c.text.slice(i + q.length, b).replace(/\n/g, ' ') });
+        i = c.text.indexOf(q, i + q.length);
+      }
+    });
+    box.innerHTML = hits.length
+      ? `<div style="padding:8px 16px;font-size:11px;color:var(--rsm)">找到 ${hits.length} 处</div>` +
+        hits.map(h => `<div class="noteItem" data-jump="${h.ci}" data-off="${h.off}">
+          <div style="font-size:14px;line-height:1.6">${esc(h.pre)}<b style="color:var(--accent)">${esc(h.hit)}</b>${esc(h.post)}</div>
+          <div class="m">${esc(R.book.chapters[h.ci].title)}</div></div>`).join('')
+      : '<div class="empty">没有找到</div>';
+  };
+  input.addEventListener('input', run);
+  run();
+  setTimeout(() => input.focus(), 80);
+  sh.onclick = e => {
+    if (e.target.classList.contains('sbg') || e.target.closest('[data-close]')) { sh.remove(); return; }
+    const c = e.target.closest('[data-jump]');
+    if (c) { jumpChapter(+c.dataset.jump, +(c.dataset.off || 0)); sh.remove(); }
+  };
+}
+
 function isBookmarked() {
   const off = currentOffset();
   return DB.marks.some(m => m.b === R.book.id && m.ch === R.ch && Math.abs(m.off - off) < 40);
@@ -1581,42 +1702,120 @@ function toggleBookmark() {
 /* =======================================================================
    听书 / 自动阅读
    ======================================================================= */
-const SP = { on:false, range:null, ch:0, base:0, timer:0, left:0, iv:0 };
+const SP = { on:false, range:null, ch:0, queue:[], idx:0, timer:0, left:0, iv:0 };
+
 function speechVoices() {
   if (!window.speechSynthesis) return [];
   return speechSynthesis.getVoices().filter(v => /^zh/i.test(v.lang));
 }
+/* iOS 自带的默认中文语音是压缩过的紧凑版，听起来很机械。
+   系统里还藏着「高级 / 增强」版本（下载后完全离线），音质接近真人。
+   这里按质量给所有可用音色打分，默认自动挑最好的那个。 */
+function voiceScore(v) {
+  let s = 0;
+  const n = (v.name || '') + ' ' + (v.voiceURI || '');
+  if (/premium|高级/i.test(n)) s += 300;
+  if (/enhanced|增强/i.test(n)) s += 200;
+  if (/siri/i.test(n)) s += 120;
+  if (v.localService) s += 40;                       // 本地合成 = 断网也能读
+  if (/zh[-_]cn|中国大陆|普通话/i.test(v.lang + n)) s += 20;
+  if (/compact|紧凑/i.test(n)) s -= 120;
+  return s;
+}
+function voiceQuality(v) {
+  const n = (v.name || '') + ' ' + (v.voiceURI || '');
+  if (/premium|高级/i.test(n)) return '高级';
+  if (/enhanced|增强/i.test(n)) return '增强';
+  if (/siri/i.test(n)) return 'Siri';
+  return '';
+}
+function rankedVoices() { return speechVoices().slice().sort((a, b) => voiceScore(b) - voiceScore(a)); }
+function pickVoice() {
+  const vs = rankedVoices();
+  if (!vs.length) return null;
+  if (cfg.voice) { const v = vs.find(x => x.name === cfg.voice); if (v) return v; }
+  return vs[0];
+}
+function speechRate() { return clamp(0.5 + cfg.rate, 0.5, 1.6); }
+
+/* 按句切分再逐句朗读：断句处天然有停顿，听感比整段丢给合成器自然得多，
+   而且每句开始时就能拿到准确位置，跟读高亮和自动翻页不再依赖不稳定的 onboundary。 */
+function splitSentences(text, base) {
+  const out = [];
+  let start = 0;
+  const re = /[。！？!?…]+[」』）】”\"]*|\n/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const end = m.index + m[0].length;
+    const t = text.slice(start, end).replace(/\n/g, '').trim();
+    if (t) out.push({ s: base + start, e: base + end, t });
+    start = end;
+  }
+  if (start < text.length) {
+    const t = text.slice(start).replace(/\n/g, '').trim();
+    if (t) out.push({ s: base + start, e: base + text.length, t });
+  }
+  return out;
+}
+
 function startSpeak(fromOff) {
   if (!window.speechSynthesis) { toast('当前浏览器不支持朗读'); return; }
-  speechSynthesis.cancel();
-  const off = fromOff != null ? fromOff : currentOffset();
-  const text = R.book.chapters[R.ch].text.slice(off);
-  if (!text) return;
-  const u = new SpeechSynthesisUtterance(text);
   const vs = speechVoices();
-  const v = vs.find(x => x.name === cfg.voice) || vs[0];
-  if (v) u.voice = v;
-  u.lang = 'zh-CN';
-  u.rate = .5 + cfg.rate * 1.5;
-  SP.base = off; SP.ch = R.ch; SP.on = true;
-  u.onboundary = e => {
-    if (e.charIndex == null) return;
-    SP.range = [off + e.charIndex, off + e.charIndex + (e.charLength || 2)];
-    paintOverlay(R.front, R.ch);
-    const pg = pageOfOffset(paneParts(R.front).flow, SP.range[0]);
-    if (pg === R.page + 1) turn(1);
-    else if (pg !== R.page) { R.page = pg; showPage(R.front, R.ch, pg); drawChrome(); }
-  };
-  u.onend = () => {
-    if (!SP.on) return;
-    if (R.ch + 1 < chapCount(R.book)) { jumpChapter(R.ch + 1, 0); startSpeak(0); }
-    else { stopSpeak(); toast('全书朗读完毕'); }
-  };
-  speechSynthesis.speak(u);
+  if (!vs.length) { toast('系统里没有可用的中文语音'); return; }
+  speechSynthesis.cancel();
+  stopAuto();
+  const off = fromOff != null ? fromOff : currentOffset();
+  SP.queue = splitSentences(R.book.chapters[R.ch].text.slice(off), off);
+  SP.idx = 0; SP.ch = R.ch; SP.on = true;
+  if (!SP.queue.length) { nextSpeakChapter(); return; }
+  speakNext();
   closeMenu(); drawChrome();
 }
+function speakNext() {
+  if (!SP.on) return;
+  if (SP.idx >= SP.queue.length) { nextSpeakChapter(); return; }
+  const item = SP.queue[SP.idx];
+  const u = new SpeechSynthesisUtterance(item.t);
+  const v = pickVoice();
+  if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'zh-CN';
+  u.rate = speechRate();
+  u.pitch = 1;
+  u.onstart = () => {
+    if (!SP.on) return;
+    SP.range = [item.s, item.e];
+    followSpeak(item.s);
+    paintOverlay(R.front, R.ch);
+  };
+  u.onboundary = e => {
+    if (!SP.on || e.charIndex == null) return;
+    SP.range = [item.s + e.charIndex, item.s + e.charIndex + (e.charLength || 3)];
+    paintOverlay(R.front, R.ch);
+  };
+  u.onend = () => { if (!SP.on) return; SP.idx++; speakNext(); };
+  u.onerror = () => { if (!SP.on) return; SP.idx++; setTimeout(speakNext, 80); };
+  speechSynthesis.speak(u);
+}
+function followSpeak(off) {
+  const pg = pageOfOffset(paneParts(R.front).flow, off);
+  if (pg === R.page) return;
+  if (pg === R.page + 1) turn(1);
+  else { R.page = pg; showPage(R.front, R.ch, pg); drawChrome(); }
+}
+function nextSpeakChapter() {
+  if (R.ch + 1 < chapCount(R.book)) { jumpChapter(R.ch + 1, 0); startSpeak(0); }
+  else { stopSpeak(); toast('全书朗读完毕'); }
+}
+function previewVoice(name) {
+  if (!window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance('这是当前音色的试听效果，海面上起了雾。');
+  const v = speechVoices().find(x => x.name === name) || pickVoice();
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = speechRate();
+  speechSynthesis.speak(u);
+}
 function stopSpeak() {
-  SP.on = false; SP.range = null;
+  SP.on = false; SP.range = null; SP.queue = []; SP.idx = 0;
   window.speechSynthesis && speechSynthesis.cancel();
   clearInterval(SP.iv); SP.timer = 0; SP.left = 0;
   if (R.book) { paintOverlay(R.front, R.ch); drawChrome(); }
@@ -1624,7 +1823,11 @@ function stopSpeak() {
 function sleepTimer(min) {
   clearInterval(SP.iv); SP.timer = min; SP.left = min * 60;
   if (!min) return;
-  SP.iv = setInterval(() => { SP.left--; if (SP.left <= 0) { stopSpeak(); toast('定时结束'); } if (R.panel === 'speech') drawPanel(); }, 1000);
+  SP.iv = setInterval(() => {
+    SP.left--;
+    if (SP.left <= 0) { stopSpeak(); toast('定时结束'); }
+    if (R.panel === 'speech') drawPanel();
+  }, 1000);
 }
 const AUTO = { on:false, raf:0, last:0, acc:0 };
 function startAuto() {
@@ -1679,7 +1882,7 @@ function onReaderClick(e) {
     if (!isNaN(v) && k !== 'theme' && k !== 'font' && k !== 'mode' && k !== 'tap' && k !== 'autoMode') v = +v;
     cfg[k] = v; DB.save();
     if (k === 'theme') { applyTheme(); updateNightBtn(); }
-    if (k === 'mode') { layout(); gotoOffset(currentOffset()); }
+    if (k === 'mode' || k === 'columns') { const off = currentOffset(); layout(); gotoOffset(off); }
     else reflow();
     drawPanel(); return;
   }
@@ -1703,9 +1906,11 @@ function onReaderClick(e) {
   else if (a === 'prevCh') { jumpChapter(R.ch - 1, 0); drawSeek(); }
   else if (a === 'nextCh') { jumpChapter(R.ch + 1, 0); drawSeek(); }
   else if (a === 'bookmark') toggleBookmark();
+  else if (a === 'bookSearch') openBookSearch();
   else if (a === 'resetType') { Object.assign(cfg, { fs:19, lh:1.62, ps:13, ls:.2, mx:22, bold:false }); DB.save(); reflow(); drawPanel(); }
   else if (a === 'speakToggle') { if (SP.on) stopSpeak(); else startSpeak(); drawPanel(); }
   else if (a === 'speakStop') { stopSpeak(); drawPanel(); }
+  else if (a === 'previewVoice') previewVoice(cfg.voice)
   else if (a === 'autoToggle') { if (AUTO.on) stopAuto(); else startAuto(); }
 }
 function reflow() {
@@ -1722,10 +1927,14 @@ document.addEventListener('input', e => {
     const lbl = r.nextElementSibling;
     if (lbl) lbl.textContent = k === 'dim' ? Math.round((1 - cfg.dim) * 100) + '%'
       : k === 'warm' ? (cfg.warm < .02 ? '关' : Math.round(cfg.warm * 100) + '%')
-      : k === 'rate' ? (.5 + cfg.rate * 1.5).toFixed(1) + 'x'
+      : k === 'rate' ? speechRate().toFixed(2) + 'x'
       : k === 'autoSpeed' ? Math.round(cfg.autoSpeed * 100) : (+cfg[k]).toFixed(1);
   }
-  if (s) { cfg[s.dataset.sel] = s.value; DB.save(); if (SP.on) startSpeak(); }
+  if (s) {
+    cfg[s.dataset.sel] = s.value; DB.save();
+    if (SP.on) startSpeak(SP.queue[SP.idx] ? SP.queue[SP.idx].s : undefined);
+    else previewVoice(s.value);
+  }
 });
 /* 进度条拖动 */
 document.addEventListener('pointerdown', e => {
@@ -1796,6 +2005,9 @@ document.addEventListener('click', e => {
   else if (a === 'prefs') openPrefs();
   else if (a === 'notes') openNotes();
   else if (a === 'about') openAbout();
+  else if (a === 'backup') openBackup();
+  else if (a === 'exportData') exportData();
+  else if (a === 'importData') $('#impFile').click();
   else if (a === 'a2hs') showA2HS(true);
 });
 
@@ -1813,24 +2025,52 @@ function makeIcon(size) {
   x.fillText('橙', size / 2, size * .54);
   return c.toDataURL('image/png');
 }
+function setMeta(name, content) {
+  let m = document.querySelector('meta[name="' + name + '"]');
+  if (!m) { m = document.createElement('meta'); m.setAttribute('name', name); document.head.appendChild(m); }
+  m.setAttribute('content', content);
+  return m;
+}
+function setLink(rel, href) {
+  let l = document.querySelector('link[rel="' + rel + '"]');
+  if (!l) { l = document.createElement('link'); l.setAttribute('rel', rel); document.head.appendChild(l); }
+  l.setAttribute('href', href);
+  return l;
+}
 function setupPWA() {
-  const add = (tag, attrs) => { const e = document.createElement(tag); Object.assign(e, attrs); document.head.appendChild(e); return e; };
-  add('meta', { name:'viewport', content:'width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no' });
-  add('meta', { name:'apple-mobile-web-app-capable', content:'yes' });
-  add('meta', { name:'mobile-web-app-capable', content:'yes' });
-  add('meta', { name:'apple-mobile-web-app-status-bar-style', content:'black-translucent' });
-  add('meta', { name:'apple-mobile-web-app-title', content:'橙阅' });
-  add('meta', { name:'theme-color', content:'#F3EDE1' });
-  const icon = makeIcon(180);
-  add('link', { rel:'apple-touch-icon', href:icon });
-  add('link', { rel:'icon', href:makeIcon(64) });
+  // 关键：外壳页面本来就有一个 viewport，必须改写它而不是再加一个，
+  // 否则 viewport-fit=cover 不生效，全屏时顶部（灵动岛那一条）会留白。
+  setMeta('viewport', 'width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no,shrink-to-fit=no');
+  setMeta('apple-mobile-web-app-capable', 'yes');
+  setMeta('mobile-web-app-capable', 'yes');
+  setMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
+  setMeta('apple-mobile-web-app-title', '橙阅');
+  setMeta('theme-color', '#F3EDE1');
+  setLink('apple-touch-icon', makeIcon(180));
+  setLink('icon', makeIcon(64));
   try {
-    const manifest = { name:'橙阅', short_name:'橙阅', display:'standalone', background_color:'#F3EDE1',
-      theme_color:'#FF6A2B', start_url:location.href, icons:[{ src:makeIcon(192), sizes:'192x192', type:'image/png' },
-      { src:makeIcon(512), sizes:'512x512', type:'image/png' }] };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type:'application/manifest+json' }));
-    add('link', { rel:'manifest', href:url });
+    const manifest = { name:'橙阅', short_name:'橙阅', display:'standalone', orientation:'any',
+      background_color:'#F3EDE1', theme_color:'#FF6A2B', start_url:location.href, scope:'./',
+      icons:[{ src:makeIcon(192), sizes:'192x192', type:'image/png', purpose:'any' },
+             { src:makeIcon(512), sizes:'512x512', type:'image/png', purpose:'any' }] };
+    setLink('manifest', URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type:'application/manifest+json' })));
   } catch (e) {}
+  updateStandalone();
+}
+/* 全屏运行时内容会顶到状态栏下面。iOS 的 black-translucent 状态栏文字固定是白色，
+   浅色主题上会看不清，所以在浅底时给最顶端加一层极淡的渐变压暗。 */
+function updateStandalone() {
+  const sa = standalone();
+  document.documentElement.classList.toggle('standalone', sa);
+  let scrim = document.getElementById('statusScrim');
+  if (!scrim) {
+    scrim = document.createElement('div'); scrim.id = 'statusScrim';
+    document.getElementById('app').appendChild(scrim);
+  }
+  const light = R.book ? !themeNow().dark
+    : !(document.documentElement.dataset.theme === 'dark'
+        || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme:dark)').matches));
+  scrim.style.opacity = (sa && light) ? '1' : '0';
 }
 function standalone() {
   return window.navigator.standalone === true || matchMedia('(display-mode:standalone)').matches;
