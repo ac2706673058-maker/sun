@@ -86,6 +86,7 @@ fun ChatScreen(
     onOpenContext: () -> Unit,
     onOpenChatList: () -> Unit,
     onNewChat: (String) -> Unit,
+    onSwitchChat: (String) -> Unit,
 ) {
     val state by vm.ui.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
@@ -103,7 +104,9 @@ fun ChatScreen(
     val atBottom by remember {
         derivedStateOf { listState.firstVisibleItemIndex <= 1 }
     }
-    LaunchedEffect(vm.streamingText, visible.size) {
+    // 只在新增消息时滚动。流式增长靠 reverseLayout 自己吸底，
+    // 要是把 streamingText 也当 key，这个 effect 会被每帧重启，滚动动画一直被打断。
+    LaunchedEffect(visible.size) {
         if (atBottom) listState.animateScrollToItem(0)
     }
 
@@ -166,7 +169,7 @@ fun ChatScreen(
                 ) {
                     ErrorBanner(
                         message = vm.error.orEmpty(),
-                        onRetry = { vm.error = null; vm.nudge() },
+                        onRetry = { vm.retryLast() },
                         onDismiss = { vm.error = null },
                     )
                 }
@@ -269,7 +272,9 @@ fun ChatScreen(
             onTogglePin = { vm.togglePin(target.id); actionTarget = null },
             onToggleHide = { vm.toggleHide(target.id); actionTarget = null },
             onBranch = {
-                scope.launch { vm.branchFrom(target.idx)?.let { vm.open(it) } }
+                // 走导航而不是只切 VM：否则路由参数还停在旧会话上，
+                // 退出去再进来会莫名其妙回到分叉前
+                scope.launch { vm.branchFrom(target.idx)?.let { onSwitchChat(it) } }
                 actionTarget = null
             },
             onDeleteSwipe = { vm.deleteSwipe(target.id); actionTarget = null },

@@ -52,8 +52,12 @@ import com.murmur.app.ui.settings.SettingText
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoryScreen(vm: AppViewModel, chatId: String, onBack: () -> Unit) {
-    val memories by vm.observeMemories(chatId).collectAsStateWithLifecycle(emptyList())
-    val chat by vm.observeChat(chatId).collectAsStateWithLifecycle(null)
+    // Room 的 DAO 每次调用都返回一个新的 Flow 实例，而 collectAsStateWithLifecycle
+    // 是按 Flow 实例做 key 的 —— 不 remember 住的话，每次重组都会退订再重订一遍查询。
+    val memories by remember(chatId) { vm.observeMemories(chatId) }
+        .collectAsStateWithLifecycle(emptyList())
+    val chat by remember(chatId) { vm.observeChat(chatId) }
+        .collectAsStateWithLifecycle(null)
     var editing by remember { mutableStateOf<MemoryEntity?>(null) }
     var editingSummary by remember { mutableStateOf(false) }
 

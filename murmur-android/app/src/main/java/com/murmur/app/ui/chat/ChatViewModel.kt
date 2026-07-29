@@ -86,6 +86,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private var genJob: Job? = null
     private var drainJob: Job? = null
+    private var maintenanceJob: Job? = null
+    private var lastMode: GenMode? = null
     private val pending = StringBuilder()
     private var smoothing = true
 
@@ -130,6 +132,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         generate(GenMode.Impersonate)
     }
 
+    /** 失败后重试要重放同一个动作：重roll 失败了就该继续重roll，而不是凭空多出一条新回复。 */
+    fun retryLast() {
+        if (isGenerating) return
+        error = null
+        generate(lastMode ?: GenMode.New)
+    }
+
     fun generate(mode: GenMode) {
         val id = chatId ?: return
         genJob?.cancel()
@@ -139,6 +148,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         synchronized(pending) { pending.setLength(0) }
         isGenerating = true
         generatingMode = mode
+        lastMode = mode
 
         genJob = viewModelScope.launch {
             val startedAt = System.currentTimeMillis()
@@ -195,15 +205,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val elapsed = System.currentTimeMillis() - startedAt
 
             if (!failed && produced.isNotEmpty()) {
-                commit(mode, produced, profile.model, elapsed)
+                commit(id, mode, produced, profile.model, elapsed)
                 streamingText = ""
                 reasoningText = ""
-                if (mode !is GenMode.Impersonate) {
-                    launch { runCatching { repo.runMaintenance(id) } }
-                }
+                if (mode !is GenMode.Impersonate) scheduleMaintenance(id)
             } else if (failed && produced.isNotEmpty()) {
                 // 中途断了但已经有内容：留下来，别让用户白等
-                commit(mode, produced, profile.model, elapsed)
+                commit(id, mode, produced, profile.model, elapsed)
                 streamingText = ""
             }
 
@@ -212,8 +220,33 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun commit(mode: GenMode, text: String, model: String, elapsed: Long) {
-        val id = chatId ?: return
+    /**
+     * 上下文维护必须独立于 genJob。
+     * 它要是挂在生成协程下面，用户回得快一点，下一次 generate() 开头的 genJob.cancel()
+     * 就会把场景跟踪、记忆抽取、归档压缩一起带走 —— 聊得越顺，核心功能越不工作。
+     * 已经在跑就跳过：每一步都各自推进自己的水位线，漏掉一轮下一轮会补上，
+     * 但绝不能中途被砍。
+     */
+    private fun scheduleMaintenance(chatId: String) {
+        if (maintenanceJob?.isActive == true) return
+        maintenanceJob = viewModelScope.launch {
+            runCatching { repo.runMaintenance(chatId) }
+        }
+    }
+
+    /**
+     * chatId 必须由调用方显式传进来，不能在这里读 [chatIdFlow]。
+     * 取消生成时保存半截回复是异步的，而 open() 会紧接着切换当前会话——
+     * 真到执行的时候读到的就是新会话，半截回复会落到刚点开的那段对话里。
+     */
+    private suspend fun commit(
+        chatId: String,
+        mode: GenMode,
+        text: String,
+        model: String,
+        elapsed: Long,
+    ) {
+        val id = chatId.ifBlank { return }
         when (mode) {
             GenMode.New -> repo.appendMessage(id, "assistant", text, model, elapsed)
             is GenMode.Swipe -> repo.addSwipe(mode.messageId, text, model, elapsed)
@@ -261,6 +294,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun cancelGeneration(persistPartial: Boolean) {
         val job = genJob ?: return
         val mode = generatingMode
+        // 在切换会话之前就把归属定下来
+        val targetChat = chatIdFlow.value
+        // 先把平滑缓冲里还没吐出来的字倒进去，否则按停止会丢掉最后一小段
+        flushPending()
         val partial = streamingText.trim()
         job.cancel()
         genJob = null
@@ -269,10 +306,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         synchronized(pending) { pending.setLength(0) }
         isGenerating = false
         generatingMode = null
-        if (persistPartial && partial.isNotEmpty() && mode != null && mode !is GenMode.Impersonate) {
+        if (persistPartial && partial.isNotEmpty() && mode != null &&
+            mode !is GenMode.Impersonate && targetChat != null
+        ) {
             viewModelScope.launch {
-                commit(mode, partial, "", 0)
-                streamingText = ""
+                commit(targetChat, mode, partial, "", 0)
+                if (chatIdFlow.value == targetChat) streamingText = ""
             }
         } else {
             streamingText = ""

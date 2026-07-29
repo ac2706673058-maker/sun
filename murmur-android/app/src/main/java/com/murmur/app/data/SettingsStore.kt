@@ -19,6 +19,8 @@ data class AppSettings(
     val onboarded: Boolean = false,
     val ageConfirmed: Boolean = false,
     val activePersonaId: String? = null,
+    /** 内置角色只在首次安装时播种一次，删掉之后不该又自己长回来 */
+    val charactersSeeded: Boolean = false,
 
     // 上下文引擎
     val mainPrompt: String = PromptTemplates.DEFAULT_MAIN,

@@ -353,9 +353,7 @@ private fun CharacterActionsDialog(
                 DialogRow("编辑人设", onEdit)
                 DialogRow("重新开一段对话", onNewChat)
                 DialogRow("复制一份", onDuplicate)
-                if (!character.builtin) {
-                    DialogRow("删除角色", onDelete, destructive = true)
-                }
+                DialogRow("删除角色", onDelete, destructive = true)
             }
         },
         confirmButton = {

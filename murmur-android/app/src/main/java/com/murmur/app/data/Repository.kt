@@ -37,11 +37,13 @@ class Repository private constructor(private val appContext: Context) {
     // ---- 初始化 ----
 
     suspend fun seedIfNeeded() {
-        if (db.characters().count() == 0) {
+        // 按标记位而不是按数量播种：否则用户把自带角色删光之后，下次启动又全回来了
+        if (!settings.get().charactersSeeded) {
             BuiltinCharacters.all().forEach { (char, loreList) ->
                 db.characters().upsert(char)
                 if (loreList.isNotEmpty()) db.lore().upsertAll(loreList)
             }
+            settings.update { it.copy(charactersSeeded = true) }
         }
         if (db.personas().count() == 0) {
             db.personas().upsert(

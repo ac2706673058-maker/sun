@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.murmur.app.data.db.ApiProfileEntity
 import com.murmur.app.ui.AppViewModel
 import com.murmur.app.ui.settings.SettingText
 import kotlinx.coroutines.launch
@@ -158,11 +160,26 @@ private fun AgeGateStep(onConfirm: () -> Unit, onBack: () -> Unit) {
 @Composable
 private fun ApiStep(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
     val profiles by vm.apiProfiles.collectAsStateWithLifecycle()
-    val profile = profiles.firstOrNull { it.isActive } ?: profiles.firstOrNull()
     val scope = rememberCoroutineScope()
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
     var ok by remember { mutableStateOf(false) }
+
+    // 输入框必须绑在同步更新的本地草稿上。
+    // 直接绑 Room Flow 收上来的对象的话，打字快的时候第二个键会基于还没刷新的旧值 copy，
+    // 前面敲的字符就没了 —— 填 Key 的时候这个尤其致命。
+    var draft by remember { mutableStateOf<ApiProfileEntity?>(null) }
+    LaunchedEffect(profiles) {
+        if (draft == null || profiles.none { it.id == draft?.id }) {
+            draft = profiles.firstOrNull { it.isActive } ?: profiles.firstOrNull()
+        }
+    }
+    val profile = draft
+
+    fun edit(updated: ApiProfileEntity) {
+        draft = updated
+        vm.saveProfile(updated)
+    }
 
     if (profile == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -198,7 +215,7 @@ private fun ApiStep(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
                 ) {
                     row.forEach { (label, url) ->
                         AssistChip(
-                            onClick = { vm.saveProfile(profile.copy(baseUrl = url)) },
+                            onClick = { edit(profile.copy(baseUrl = url)) },
                             label = { Text(label, style = MaterialTheme.typography.labelMedium) },
                             modifier = Modifier.weight(1f),
                         )
@@ -210,17 +227,17 @@ private fun ApiStep(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
 
         SettingText(
             "接口地址", profile.baseUrl,
-            { vm.saveProfile(profile.copy(baseUrl = it.trim())) },
+            { edit(profile.copy(baseUrl = it.trim())) },
             placeholder = "https://api.example.com/v1",
         )
         SettingText(
             "API Key", profile.apiKey,
-            { vm.saveProfile(profile.copy(apiKey = it.trim())) },
+            { edit(profile.copy(apiKey = it.trim())) },
             isSecret = true,
         )
         SettingText(
             "模型名", profile.model,
-            { vm.saveProfile(profile.copy(model = it.trim())) },
+            { edit(profile.copy(model = it.trim())) },
             placeholder = "deepseek-chat / gpt-4o / …",
         )
 

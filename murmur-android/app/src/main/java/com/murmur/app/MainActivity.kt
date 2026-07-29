@@ -119,10 +119,12 @@ private fun MurmurRoot() {
                     scope.launch {
                         val id = appVm.newChat(characterId)
                         chatVm.open(id)
-                        nav.navigate(Routes.chat(id)) {
-                            popUpTo(Routes.HOME)
-                        }
+                        nav.navigate(Routes.chat(id)) { popUpTo(Routes.HOME) }
                     }
+                },
+                onSwitchChat = { id ->
+                    chatVm.open(id)
+                    nav.navigate(Routes.chat(id)) { popUpTo(Routes.HOME) }
                 },
             )
         }

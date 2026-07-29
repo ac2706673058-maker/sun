@@ -73,7 +73,8 @@ fun CharacterEditScreen(
         vm.observeCharacter(characterId).map { Loaded(it) }
     }.collectAsStateWithLifecycle(null)
 
-    val loreList by vm.observeLore(characterId).collectAsStateWithLifecycle(emptyList())
+    val loreList by remember(characterId) { vm.observeLore(characterId) }
+        .collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
