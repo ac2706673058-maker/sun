@@ -1,0 +1,88 @@
+package com.murmur.app.data
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.murmur.app.data.db.AppJson
+import com.murmur.app.engine.EngineSettings
+import com.murmur.app.engine.PromptTemplates
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+
+private val Context.dataStore by preferencesDataStore("murmur_settings")
+
+@Serializable
+data class AppSettings(
+    val onboarded: Boolean = false,
+    val ageConfirmed: Boolean = false,
+    val activePersonaId: String? = null,
+
+    // 上下文引擎
+    val mainPrompt: String = PromptTemplates.DEFAULT_MAIN,
+    val postHistory: String = PromptTemplates.DEFAULT_POST_HISTORY,
+    val customDirective: String = "",
+    val anchorEnabled: Boolean = true,
+    val anchorDepth: Int = 1,
+    val lengthHint: String = "medium",
+    val exampleDialogueEnabled: Boolean = true,
+    val antiRepeatEnabled: Boolean = true,
+    val summaryEnabled: Boolean = true,
+    val memoryEnabled: Boolean = true,
+    val sceneTrackingEnabled: Boolean = true,
+    val historyFloorRatio: Float = 0.5f,
+    val maxMemoriesInContext: Int = 12,
+
+    // 后台维护节奏
+    /** 历史被挤出上下文后，累计到这么多条就压进梗概 */
+    val summarizeBatchSize: Int = 6,
+    /** 每这么多轮对话抽一次长期记忆 */
+    val memoryEveryNTurns: Int = 4,
+
+    // 界面
+    val fontScale: Float = 1f,
+    val hapticsEnabled: Boolean = true,
+    val ttsAutoRead: Boolean = false,
+    val showContextBar: Boolean = true,
+    val streamingSmoothing: Boolean = true,
+    val enterToSend: Boolean = false,
+) {
+    fun toEngineSettings() = EngineSettings(
+        mainPrompt = mainPrompt,
+        postHistory = postHistory,
+        customDirective = customDirective,
+        anchorEnabled = anchorEnabled,
+        anchorDepth = anchorDepth,
+        lengthHint = lengthHint,
+        exampleDialogueEnabled = exampleDialogueEnabled,
+        antiRepeatEnabled = antiRepeatEnabled,
+        summaryEnabled = summaryEnabled,
+        memoryEnabled = memoryEnabled,
+        sceneTrackingEnabled = sceneTrackingEnabled,
+        historyFloorRatio = historyFloorRatio,
+        maxMemoriesInContext = maxMemoriesInContext,
+    )
+}
+
+class SettingsStore(private val context: Context) {
+
+    private val key = stringPreferencesKey("app_settings_json")
+
+    val flow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
+        prefs[key]?.let { runCatching { AppJson.decodeFromString<AppSettings>(it) }.getOrNull() }
+            ?: AppSettings()
+    }
+
+    suspend fun get(): AppSettings = flow.first()
+
+    suspend fun update(transform: (AppSettings) -> AppSettings) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[key]
+                ?.let { runCatching { AppJson.decodeFromString<AppSettings>(it) }.getOrNull() }
+                ?: AppSettings()
+            prefs[key] = AppJson.encodeToString(AppSettings.serializer(), transform(current))
+        }
+    }
+}

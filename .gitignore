@@ -5,3 +5,10 @@ DerivedData/
 xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store
+
+# Android
+murmur-android/.gradle/
+murmur-android/build/
+murmur-android/app/build/
+murmur-android/local.properties
+murmur-android/.kotlin/
