@@ -14,6 +14,8 @@ import com.murmur.app.engine.BuiltPrompt
 import com.murmur.app.engine.ContextBuilder
 import com.murmur.app.engine.ContextInput
 import com.murmur.app.engine.ContextMaintainer
+import com.murmur.app.engine.Perspective
+import com.murmur.app.engine.SuggestionEngine
 import com.murmur.app.engine.PromptTemplates
 import com.murmur.app.net.OpenAiClient
 import java.io.File
@@ -25,6 +27,7 @@ class Repository private constructor(private val appContext: Context) {
     val settings = SettingsStore(appContext)
     val client = OpenAiClient()
     private val maintainer = ContextMaintainer(client)
+    private val suggester = SuggestionEngine(client)
 
     val characters get() = db.characters()
     val personas get() = db.personas()
@@ -241,10 +244,31 @@ class Repository private constructor(private val appContext: Context) {
 
     // ---- 上下文 ----
 
+    /** 实时候选回复。失败返回空列表，绝不影响正常对话。 */
+    suspend fun generateSuggestions(chatId: String): Result<List<String>> {
+        val app = settings.get()
+        if (!app.suggestionsEnabled) return Result.success(emptyList())
+        val chat = db.chats().get(chatId) ?: return Result.success(emptyList())
+        val char = db.characters().get(chat.characterId) ?: return Result.success(emptyList())
+        val profile = db.apiProfiles().getActive() ?: return Result.success(emptyList())
+        if (profile.baseUrl.isBlank() || profile.model.isBlank()) return Result.success(emptyList())
+        val persona = chat.personaId?.let { db.personas().get(it) } ?: activePersona()
+        val recent = db.messages().listForChat(chatId).filter { !it.hidden && it.content.isNotBlank() }
+        return suggester.generate(
+            profile = profile,
+            character = char,
+            persona = persona,
+            scene = SceneState.parse(chat.sceneStateJson),
+            recent = recent,
+            count = app.suggestionCount.coerceIn(2, 4),
+        )
+    }
+
     suspend fun buildPrompt(
         chatId: String,
         upToIdxExclusive: Long? = null,
         oneShotDirective: String? = null,
+        perspective: Perspective = Perspective.CHARACTER,
     ): Pair<BuiltPrompt, ApiProfileEntity>? {
         val chat = db.chats().get(chatId) ?: return null
         val char = db.characters().get(chat.characterId) ?: return null
@@ -272,6 +296,7 @@ class Repository private constructor(private val appContext: Context) {
                 profile = profile,
                 oneShotDirective = oneShotDirective,
                 upToIdxExclusive = upToIdxExclusive,
+                perspective = perspective,
             )
         )
         return built to profile
@@ -381,9 +406,15 @@ class Repository private constructor(private val appContext: Context) {
         return char.id
     }
 
-    fun saveAvatar(characterId: String, bytes: ByteArray): String? = runCatching {
-        val dir = File(appContext.filesDir, "avatars").apply { mkdirs() }
-        val f = File(dir, "$characterId.png")
+    fun saveAvatar(characterId: String, bytes: ByteArray): String? =
+        saveImage("avatars", characterId, bytes)
+
+    /** 图片一律复制进应用私有目录：外部 Uri 的读权限过一阵就失效了，存路径没用。 */
+    fun saveImage(kind: String, id: String, bytes: ByteArray): String? = runCatching {
+        val dir = File(appContext.filesDir, kind).apply { mkdirs() }
+        // 换图时带上时间戳，避免 Coil 命中旧文件路径的缓存
+        dir.listFiles()?.filter { it.name.startsWith("$id-") }?.forEach { it.delete() }
+        val f = File(dir, "$id-${System.currentTimeMillis()}.img")
         f.writeBytes(bytes)
         f.absolutePath
     }.getOrNull()

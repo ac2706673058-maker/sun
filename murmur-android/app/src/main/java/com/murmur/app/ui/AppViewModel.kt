@@ -94,18 +94,50 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteLore(id: String) = viewModelScope.launch { repo.lore.deleteById(id) }
 
+    private suspend fun readBytes(uri: Uri): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+    }
+
     fun setAvatar(characterId: String, uri: Uri) = viewModelScope.launch {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            }.getOrNull()?.let { bytes ->
-                repo.saveAvatar(characterId, bytes)?.let { path ->
-                    repo.characters.get(characterId)?.let { c ->
-                        repo.upsertCharacter(c.copy(avatarUri = path))
-                    }
-                }
+        val bytes = readBytes(uri) ?: return@launch
+        val path = repo.saveImage("avatars", characterId, bytes) ?: return@launch
+        repo.characters.get(characterId)?.let { repo.upsertCharacter(it.copy(avatarUri = path)) }
+    }
+
+    fun setPortrait(characterId: String, uri: Uri) = viewModelScope.launch {
+        val bytes = readBytes(uri) ?: return@launch
+        val path = repo.saveImage("portraits", characterId, bytes) ?: return@launch
+        repo.characters.get(characterId)?.let { repo.upsertCharacter(it.copy(portraitUri = path)) }
+    }
+
+    fun setCharacterBackground(characterId: String, uri: Uri) = viewModelScope.launch {
+        val bytes = readBytes(uri) ?: return@launch
+        val path = repo.saveImage("backgrounds", characterId, bytes) ?: return@launch
+        repo.characters.get(characterId)?.let { repo.upsertCharacter(it.copy(backgroundUri = path)) }
+    }
+
+    fun clearCharacterImages(characterId: String, portrait: Boolean, background: Boolean) =
+        viewModelScope.launch {
+            repo.characters.get(characterId)?.let {
+                repo.upsertCharacter(
+                    it.copy(
+                        portraitUri = if (portrait) null else it.portraitUri,
+                        backgroundUri = if (background) null else it.backgroundUri,
+                    )
+                )
             }
         }
+
+    fun setGlobalBackground(uri: Uri?) = viewModelScope.launch {
+        if (uri == null) {
+            repo.settings.update { it.copy(globalBackgroundUri = null) }
+            return@launch
+        }
+        val bytes = readBytes(uri) ?: return@launch
+        val path = repo.saveImage("backgrounds", "global", bytes) ?: return@launch
+        repo.settings.update { it.copy(globalBackgroundUri = path) }
     }
 
     /** 导入角色卡：PNG（内嵌 JSON）或纯 JSON 都吃。 */

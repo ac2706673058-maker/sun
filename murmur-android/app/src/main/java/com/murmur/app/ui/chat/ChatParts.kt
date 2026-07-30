@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -77,10 +78,12 @@ fun ChatInputBar(
     onNudge: () -> Unit,
     onImpersonate: () -> Unit,
     onContinue: () -> Unit,
+    onSuggest: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
-    Surface(color = MaterialTheme.colorScheme.background) {
+    // 半透明，让背景图透上来一点，但要足够实以保证输入区可读
+    Surface(color = MaterialTheme.colorScheme.background.copy(alpha = 0.88f)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -110,6 +113,11 @@ fun ChatInputBar(
                         text = { Text("替我想一句") },
                         leadingIcon = { Icon(Icons.Default.Psychology, null) },
                         onClick = { menuOpen = false; onImpersonate() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("给我几个选项") },
+                        leadingIcon = { Icon(Icons.Default.Lightbulb, null) },
+                        onClick = { menuOpen = false; onSuggest() },
                     )
                 }
             }

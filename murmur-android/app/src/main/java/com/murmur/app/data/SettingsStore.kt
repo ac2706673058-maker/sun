@@ -43,6 +43,20 @@ data class AppSettings(
     /** 每这么多轮对话抽一次长期记忆 */
     val memoryEveryNTurns: Int = 4,
 
+    // 候选回复
+    val suggestionsEnabled: Boolean = true,
+    /** 每轮角色回复结束后自动生成，关掉则改为手动点一下才生成 */
+    val suggestionsAuto: Boolean = true,
+    val suggestionCount: Int = 3,
+
+    // 外观
+    /** 全局聊天背景，角色/会话没单独设置时用这张 */
+    val globalBackgroundUri: String? = null,
+    /** 背景压暗程度，太亮会看不清字 */
+    val backgroundDim: Float = 0.58f,
+    /** 气泡不透明度，调低能透出背景 */
+    val bubbleAlpha: Float = 0.90f,
+
     // 界面
     val fontScale: Float = 1f,
     val hapticsEnabled: Boolean = true,

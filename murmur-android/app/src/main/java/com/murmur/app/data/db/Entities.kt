@@ -55,6 +55,10 @@ data class CharacterEntity(
     val creatorNotes: String = "",
     val tags: List<String> = emptyList(),
     val accentColor: Int = 0,
+    /** 大图立绘：首页头卡和聊天页顶部用 */
+    val portraitUri: String? = null,
+    /** 聊天页背景，留空则用全局背景 */
+    val backgroundUri: String? = null,
     val ttsVoice: String? = null,
     val favorite: Boolean = false,
     val builtin: Boolean = false,
@@ -93,6 +97,8 @@ data class ChatEntity(
     val sceneStateJson: String = "",
     /** 上次做记忆抽取时覆盖到的 idx */
     val memoryScannedUpToIdx: Long = -1,
+    /** 这段对话专属的背景，优先级高于角色背景 */
+    val backgroundUri: String? = null,
 )
 
 @Entity(

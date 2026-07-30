@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -21,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,7 +31,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -40,7 +39,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +69,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.murmur.app.data.db.MessageEntity
 import com.murmur.app.ui.components.Avatar
+import com.murmur.app.ui.components.ChatBackdrop
+import com.murmur.app.ui.components.EdgeFade
 import com.murmur.app.ui.components.RoleplayText
 import com.murmur.app.ui.components.TypingDots
 import kotlinx.coroutines.launch
@@ -89,6 +89,7 @@ fun ChatScreen(
     onSwitchChat: (String) -> Unit,
 ) {
     val state by vm.ui.collectAsStateWithLifecycle()
+    val settings by vm.appSettings.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -100,161 +101,182 @@ fun ChatScreen(
     val visible = remember(state.messages) { state.messages.filter { it.content.isNotBlank() } }
     val reversed = remember(visible) { visible.asReversed() }
 
-    // 用户往上翻的时候不要把他拽回底部
+    // 背景优先级：这段对话专属 → 角色的 → 全局默认
+    val backgroundUri = state.chat?.backgroundUri
+        ?: state.character?.backgroundUri
+        ?: settings.globalBackgroundUri
+    val gradientKey = state.character?.id.orEmpty()
+    val bubbleAlpha = settings.bubbleAlpha
+
     val atBottom by remember {
         derivedStateOf { listState.firstVisibleItemIndex <= 1 }
     }
-    // 只在新增消息时滚动。流式增长靠 reverseLayout 自己吸底，
-    // 要是把 streamingText 也当 key，这个 effect 会被每帧重启，滚动动画一直被打断。
+    // 只在新增消息时滚。流式增长交给 reverseLayout 吸底，
+    // 把 streamingText 当 key 会让这个 effect 每帧重启。
     LaunchedEffect(visible.size) {
-        if (atBottom) listState.animateScrollToItem(0)
+        if (atBottom && listState.layoutInfo.totalItemsCount > 0) {
+            listState.animateScrollToItem(0)
+        }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable {
-                            state.character?.let { onOpenCharacter(it.id) }
-                        },
-                    ) {
-                        state.character?.let { c ->
-                            Avatar(c.name, c.avatarUri, c.accentColor, 34.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    c.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                val sub = when {
-                                    vm.isGenerating -> "正在回复…"
-                                    else -> "${visible.size} 条消息"
+    ChatBackdrop(
+        backgroundUri = backgroundUri,
+        gradientKey = gradientKey,
+        dim = settings.backgroundDim,
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0),
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                state.character?.let { onOpenCharacter(it.id) }
+                            },
+                        ) {
+                            state.character?.let { c ->
+                                Avatar(c.name, c.avatarUri, c.accentColor, 36.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        c.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        if (vm.isGenerating) "正在回复…" else "${visible.size} 条消息",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
-                                Text(
-                                    sub,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
                             }
                         }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Default.MoreVert, "更多")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                    ),
+                )
+            },
+            bottomBar = {
+                Column(Modifier.imePadding()) {
+                    AnimatedVisibility(
+                        visible = vm.error != null,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically(),
+                    ) {
+                        ErrorBanner(
+                            message = vm.error.orEmpty(),
+                            onRetry = { vm.retryLast() },
+                            onDismiss = { vm.error = null },
+                        )
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    if (settings.suggestionsEnabled && !vm.isGenerating) {
+                        SuggestionBar(
+                            suggestions = vm.suggestions,
+                            loading = vm.suggestionsLoading,
+                            enabled = !vm.isGenerating,
+                            onPick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                vm.sendSuggestion(it)
+                            },
+                            onEdit = { vm.editSuggestion(it) },
+                            onRefresh = { vm.refreshSuggestions(force = true) },
+                        )
                     }
-                },
-                actions = {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, "更多")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-        bottomBar = {
-            Column(Modifier.imePadding()) {
-                AnimatedVisibility(
-                    visible = vm.error != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
-                ) {
-                    ErrorBanner(
-                        message = vm.error.orEmpty(),
-                        onRetry = { vm.retryLast() },
-                        onDismiss = { vm.error = null },
+                    ChatInputBar(
+                        value = vm.input,
+                        onValueChange = { vm.input = it },
+                        isGenerating = vm.isGenerating,
+                        onSend = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            vm.send()
+                        },
+                        onStop = { vm.stop() },
+                        onNudge = { vm.nudge() },
+                        onImpersonate = { vm.impersonate() },
+                        onContinue = {
+                            visible.lastOrNull { it.role == "assistant" }
+                                ?.let { vm.continueMessage(it.id) }
+                        },
+                        onSuggest = { vm.refreshSuggestions(force = true) },
                     )
                 }
-                ChatInputBar(
-                    value = vm.input,
-                    onValueChange = { vm.input = it },
-                    isGenerating = vm.isGenerating,
-                    onSend = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        vm.send()
-                    },
-                    onStop = { vm.stop() },
-                    onNudge = { vm.nudge() },
-                    onImpersonate = { vm.impersonate() },
-                    onContinue = {
-                        visible.lastOrNull { it.role == "assistant" }?.let { vm.continueMessage(it.id) }
-                    },
-                )
-            }
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            LazyColumn(
-                state = listState,
-                reverseLayout = true,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                if (vm.isGenerating || vm.streamingText.isNotEmpty()) {
-                    item(key = "streaming") {
-                        StreamingBubble(
-                            text = vm.streamingText,
-                            reasoning = vm.reasoningText,
+            },
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                LazyColumn(
+                    state = listState,
+                    reverseLayout = true,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (vm.isGenerating || vm.streamingText.isNotEmpty()) {
+                        item(key = "streaming") {
+                            StreamingBubble(
+                                text = vm.streamingText,
+                                reasoning = vm.reasoningText,
+                                characterName = state.character?.name.orEmpty(),
+                                avatarUri = state.character?.avatarUri,
+                                accent = state.character?.accentColor ?: 0,
+                                bubbleAlpha = bubbleAlpha,
+                                isImpersonating = vm.generatingMode is GenMode.Impersonate,
+                            )
+                        }
+                    }
+                    messageItems(reversed) { indexInReversed, msg ->
+                        val isLast = indexInReversed == 0
+                        MessageBubble(
+                            message = msg,
                             characterName = state.character?.name.orEmpty(),
                             avatarUri = state.character?.avatarUri,
                             accent = state.character?.accentColor ?: 0,
-                            isImpersonating = vm.generatingMode is GenMode.Impersonate,
+                            bubbleAlpha = bubbleAlpha,
+                            isLastAssistant = isLast && msg.role == "assistant" && !vm.isGenerating,
+                            onLongPress = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                actionTarget = msg
+                            },
+                            onSwipeTo = { vm.swipeTo(msg.id, it) },
+                            onRegenerate = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                vm.regenerate(msg.id)
+                            },
                         )
                     }
                 }
-                messageItems(reversed) { indexInReversed, msg ->
-                    val isLast = indexInReversed == 0
-                    MessageBubble(
-                        message = msg,
-                        characterName = state.character?.name.orEmpty(),
-                        avatarUri = state.character?.avatarUri,
-                        accent = state.character?.accentColor ?: 0,
-                        isLastAssistant = isLast && msg.role == "assistant" && !vm.isGenerating,
-                        onLongPress = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            actionTarget = msg
-                        },
-                        onSwipeTo = { vm.swipeTo(msg.id, it) },
-                        onRegenerate = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.regenerate(msg.id)
-                        },
-                    )
-                }
-            }
 
-            // 顶部渐隐，滚动时内容不会硬切在标题栏下面
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.background,
-                                Color.Transparent,
-                            )
-                        )
-                    )
-            )
+                EdgeFade(
+                    modifier = Modifier.fillMaxWidth().height(22.dp).align(Alignment.TopCenter),
+                    fromTop = true,
+                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
+                )
 
-            androidx.compose.animation.AnimatedVisibility(
-                visible = !atBottom,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                FilledTonalIconButton(onClick = { scope.launch { listState.animateScrollToItem(0) } }) {
-                    Icon(Icons.Default.KeyboardArrowDown, "回到底部")
+                AnimatedVisibility(
+                    visible = !atBottom,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    FilledTonalIconButton(onClick = {
+                        scope.launch { listState.animateScrollToItem(0) }
+                    }) {
+                        Icon(Icons.Default.KeyboardArrowDown, "回到底部")
+                    }
                 }
             }
         }
@@ -272,8 +294,7 @@ fun ChatScreen(
             onTogglePin = { vm.togglePin(target.id); actionTarget = null },
             onToggleHide = { vm.toggleHide(target.id); actionTarget = null },
             onBranch = {
-                // 走导航而不是只切 VM：否则路由参数还停在旧会话上，
-                // 退出去再进来会莫名其妙回到分叉前
+                // 走导航而不是只切 VM：否则路由参数还停在旧会话上
                 scope.launch { vm.branchFrom(target.idx)?.let { onSwitchChat(it) } }
                 actionTarget = null
             },
@@ -292,15 +313,11 @@ fun ChatScreen(
     if (menuOpen) {
         ChatMenuSheet(
             onDismiss = { menuOpen = false },
-            onOpenCharacter = {
-                state.character?.let { onOpenCharacter(it.id) }; menuOpen = false
-            },
+            onOpenCharacter = { state.character?.let { onOpenCharacter(it.id) }; menuOpen = false },
             onOpenMemory = { vm.chatId?.let { onOpenMemory(it) }; menuOpen = false },
             onOpenContext = { onOpenContext(); menuOpen = false },
             onOpenChatList = { onOpenChatList(); menuOpen = false },
-            onNewChat = {
-                state.character?.let { onNewChat(it.id) }; menuOpen = false
-            },
+            onNewChat = { state.character?.let { onNewChat(it.id) }; menuOpen = false },
             contextReport = vm.contextReport,
         )
     }
@@ -318,6 +335,7 @@ private fun MessageBubble(
     characterName: String,
     avatarUri: String?,
     accent: Int,
+    bubbleAlpha: Float,
     isLastAssistant: Boolean,
     onLongPress: () -> Unit,
     onSwipeTo: (Int) -> Unit,
@@ -338,17 +356,25 @@ private fun MessageBubble(
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
+            val shape = RoundedCornerShape(
+                topStart = 20.dp,
+                topEnd = 20.dp,
+                bottomStart = if (isUser) 20.dp else 6.dp,
+                bottomEnd = if (isUser) 6.dp else 20.dp,
+            )
             Surface(
-                shape = RoundedCornerShape(
-                    topStart = 20.dp,
-                    topEnd = 20.dp,
-                    bottomStart = if (isUser) 20.dp else 6.dp,
-                    bottomEnd = if (isUser) 6.dp else 20.dp,
-                ),
-                color = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 0.dp,
+                shape = shape,
+                color = if (isUser)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = bubbleAlpha)
+                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = bubbleAlpha),
                 modifier = Modifier
+                    // 背景图上气泡是半透明的，描一道细边才不会糊在一起
+                    .border(
+                        width = 1.dp,
+                        color = if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        else Color.White.copy(alpha = 0.07f),
+                        shape = shape,
+                    )
                     .combinedClickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -356,18 +382,20 @@ private fun MessageBubble(
                         onLongClick = onLongPress,
                     )
                     .then(
-                        if (hasSwipes && !isUser) Modifier.pointerInput(message.id, message.activeSwipe) {
-                            var total = 0f
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    if (abs(total) > 60f) {
-                                        val next = if (total < 0) message.activeSwipe + 1
-                                        else message.activeSwipe - 1
-                                        if (next in message.swipes.indices) onSwipeTo(next)
-                                    }
-                                    total = 0f
-                                },
-                            ) { _, dragAmount -> total += dragAmount }
+                        if (hasSwipes && !isUser) {
+                            Modifier.pointerInput(message.id, message.activeSwipe) {
+                                var total = 0f
+                                detectHorizontalDragGestures(
+                                    onDragEnd = {
+                                        if (abs(total) > 60f) {
+                                            val next = if (total < 0) message.activeSwipe + 1
+                                            else message.activeSwipe - 1
+                                            if (next in message.swipes.indices) onSwipeTo(next)
+                                        }
+                                        total = 0f
+                                    },
+                                ) { _, dragAmount -> total += dragAmount }
+                            }
                         } else Modifier
                     ),
             ) {
@@ -436,6 +464,7 @@ private fun StreamingBubble(
     characterName: String,
     avatarUri: String?,
     accent: Int,
+    bubbleAlpha: Float,
     isImpersonating: Boolean,
 ) {
     if (isImpersonating) {
@@ -460,10 +489,13 @@ private fun StreamingBubble(
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Avatar(characterName, avatarUri, accent, 34.dp)
         Spacer(Modifier.width(9.dp))
+        val shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
         Surface(
-            shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.widthIn(max = 320.dp),
+            shape = shape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = bubbleAlpha),
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.07f), shape),
         ) {
             Column(Modifier.padding(horizontal = 15.dp, vertical = 11.dp)) {
                 if (reasoning.isNotBlank() && text.isBlank()) {
@@ -474,11 +506,7 @@ private fun StreamingBubble(
                     )
                     Spacer(Modifier.height(6.dp))
                 }
-                if (text.isBlank()) {
-                    TypingDots()
-                } else {
-                    RoleplayText(text = text)
-                }
+                if (text.isBlank()) TypingDots() else RoleplayText(text = text)
             }
         }
     }

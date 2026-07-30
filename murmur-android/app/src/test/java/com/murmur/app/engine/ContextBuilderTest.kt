@@ -339,6 +339,55 @@ class ContextBuilderTest {
         assertTrue("复读片段应当被点名", anchor.contains("最近已经用过"))
     }
 
+    // ---- 视角切换 ----
+    // 之前只塞一条"以 {{user}} 身份写"的指令，但末尾的锚点和尾部指令还在喊"只写 {{char}}"，
+    // 位置更靠后、权重更高，把代写要求整个盖掉了 —— 表现就是"帮我想的话还是对方在说"。
+
+    @Test
+    fun `user perspective replaces the trailing instruction`() {
+        val built = ContextBuilder.build(
+            input(msgs(6), directive = PromptTemplates.IMPERSONATE)
+                .copy(perspective = Perspective.USER)
+        )
+        val last = built.messages.last()
+        assertEquals("system", last.role)
+        assertTrue("尾部指令必须换成'只输出 {{user}}'", last.content.contains("只输出 阿舟"))
+        assertFalse(
+            "绝不能再出现'只写 {{char}}'，那会盖掉代写要求",
+            last.content.contains("只写 林晚"),
+        )
+    }
+
+    @Test
+    fun `user perspective replaces the anchor too`() {
+        val built = ContextBuilder.build(
+            input(msgs(8)).copy(perspective = Perspective.USER)
+        )
+        val anchor = built.messages.first { it.content.startsWith("[ 内部信息") }.content
+        assertTrue(anchor.contains("你现在扮演的是 阿舟"))
+        assertTrue(anchor.contains("只写 阿舟，不写 林晚"))
+        assertFalse(built.messages.any { it.content.startsWith("[ 场景锚") })
+    }
+
+    @Test
+    fun `user perspective still carries scene continuity`() {
+        val scene = SceneState(location = "直播间", pose = "隔着调音台站着", threads = listOf("说好要送她回去"))
+        val built = ContextBuilder.build(
+            input(msgs(6), chat = chat(scene = scene)).copy(perspective = Perspective.USER)
+        )
+        val anchor = built.messages.first { it.content.startsWith("[ 内部信息") }.content
+        assertTrue(anchor.contains("直播间"))
+        assertTrue(anchor.contains("送她回去"))
+    }
+
+    @Test
+    fun `character perspective is unchanged by default`() {
+        val built = ContextBuilder.build(input(msgs(6)))
+        assertTrue(built.messages.any { it.content.startsWith("[ 场景锚") })
+        assertFalse(built.messages.any { it.content.startsWith("[ 内部信息") })
+        assertTrue(built.messages.last().content.contains("只写 林晚"))
+    }
+
     @Test
     fun `empty chat still produces a valid prompt`() {
         val built = ContextBuilder.build(input(emptyList()))

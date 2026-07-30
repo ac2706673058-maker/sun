@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -16,7 +18,7 @@ import androidx.room.TypeConverters
         LoreEntity::class,
         ApiProfileEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -33,12 +35,23 @@ abstract class MurmurDb : RoomDatabase() {
         @Volatile
         private var INSTANCE: MurmurDb? = null
 
+        /** 加背景/立绘字段。写真迁移而不是走销毁重建，不能因为加两列就把人聊了半天的记录清了。 */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE characters ADD COLUMN portraitUri TEXT")
+                db.execSQL("ALTER TABLE characters ADD COLUMN backgroundUri TEXT")
+                db.execSQL("ALTER TABLE chats ADD COLUMN backgroundUri TEXT")
+            }
+        }
+
         fun get(context: Context): MurmurDb = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 MurmurDb::class.java,
                 "murmur.db",
-            ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+            ).addMigrations(MIGRATION_1_2)
+                .fallbackToDestructiveMigration()
+                .build().also { INSTANCE = it }
         }
     }
 }

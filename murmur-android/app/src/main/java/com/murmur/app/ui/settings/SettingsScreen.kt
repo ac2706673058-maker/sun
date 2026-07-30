@@ -1,5 +1,7 @@
 package com.murmur.app.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,6 +81,10 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersona: () -> Un
     var modelMenu by remember { mutableStateOf(false) }
     var profileMenu by remember { mutableStateOf(false) }
     var editingPrompt by remember { mutableStateOf<String?>(null) }
+
+    val bgPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.setGlobalBackground(uri) }
 
     fun save(p: ApiProfileEntity) {
         draft = p
@@ -428,7 +434,68 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersona: () -> Un
             }
 
             item {
-                SettingSection("外观与手感") {
+                SettingSection(
+                    "候选回复",
+                    if (settings.suggestionsEnabled) "每轮给三个你可能会说的话" else "已关闭",
+                    initiallyExpanded = true,
+                ) {
+                    SettingSwitch(
+                        "开启候选回复",
+                        "站在你的立场实时生成，点一下直接发，点笔可以改完再发",
+                        settings.suggestionsEnabled,
+                    ) { v -> vm.updateSettings { it.copy(suggestionsEnabled = v) } }
+                    if (settings.suggestionsEnabled) {
+                        SettingSwitch(
+                            "自动生成",
+                            "关掉之后不会每轮都花 token，改成在「+」菜单里手动点「给我几个选项」",
+                            settings.suggestionsAuto,
+                        ) { v -> vm.updateSettings { it.copy(suggestionsAuto = v) } }
+                        SettingIntSlider(
+                            "每次给几个", settings.suggestionCount, 2..4, suffix = " 个",
+                        ) { v -> vm.updateSettings { it.copy(suggestionCount = v) } }
+                        Text(
+                            "候选用的是精简上下文（最近 8 轮 + 人设 + 当前场景），" +
+                                "不是完整上下文，所以开销大约是主回复的十分之一。" +
+                                "接口设置里填了「后台任务模型」的话会走那个更便宜的模型。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            item {
+                SettingSection("外观与手感", "聊天背景、气泡通透度") {
+                    Text(
+                        "全局聊天背景",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "单个角色可以在角色编辑页里设自己的背景，会盖过这一张。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { bgPicker.launch(arrayOf("image/*")) }) {
+                            Text(if (settings.globalBackgroundUri == null) "选一张" else "换一张")
+                        }
+                        if (settings.globalBackgroundUri != null) {
+                            TextButton(onClick = { vm.setGlobalBackground(null) }) { Text("清除") }
+                        }
+                    }
+                    SettingSlider(
+                        "背景压暗", settings.backgroundDim, 0.2f..0.92f,
+                        hint = "压得越狠字越清楚，图越弱。浅色照片建议往右调",
+                        format = { "${(it * 100).toInt()}%" },
+                    ) { v -> vm.updateSettings { it.copy(backgroundDim = v) } }
+                    SettingSlider(
+                        "气泡不透明度", settings.bubbleAlpha, 0.45f..1f,
+                        hint = "调低能透出背景，但太低会影响正文可读性",
+                        format = { "${(it * 100).toInt()}%" },
+                    ) { v -> vm.updateSettings { it.copy(bubbleAlpha = v) } }
+
                     SettingSwitch(
                         "平滑打字", "把流式返回的爆发式分块摊匀，看起来像真的在打字",
                         settings.streamingSmoothing,

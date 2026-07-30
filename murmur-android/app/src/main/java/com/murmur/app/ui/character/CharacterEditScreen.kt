@@ -3,9 +3,11 @@ package com.murmur.app.ui.character
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -43,6 +46,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -51,6 +56,7 @@ import com.murmur.app.data.db.CharacterEntity
 import com.murmur.app.data.db.LoreEntity
 import com.murmur.app.ui.AppViewModel
 import com.murmur.app.ui.components.Avatar
+import com.murmur.app.ui.components.CoverArt
 import com.murmur.app.ui.settings.SettingSection
 import com.murmur.app.ui.settings.SettingText
 import kotlinx.coroutines.flow.map
@@ -59,6 +65,45 @@ import java.util.UUID
 
 /** 区分「Flow 还没发射」和「发射了但是 null」。 */
 private data class Loaded(val value: CharacterEntity?)
+
+@Composable
+private fun ImageSlot(
+    label: String,
+    imageUri: String?,
+    gradientKey: String,
+    modifier: Modifier = Modifier,
+    onPick: () -> Unit,
+) {
+    Column(modifier) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.78f)
+                .clip(RoundedCornerShape(14.dp))
+                .clickable(onClick = onPick),
+        ) {
+            CoverArt(imageUri, gradientKey, Modifier.fillMaxSize())
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = if (imageUri == null) 0.15f else 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (imageUri == null) "选一张" else "换一张",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,8 +128,24 @@ fun CharacterEditScreen(
     val existing = loaded?.value
     LaunchedEffect(loaded) {
         val snapshot = loaded ?: return@LaunchedEffect
-        if (draft == null) {
+        val current = draft
+        if (current == null) {
             draft = snapshot.value ?: CharacterEntity(id = characterId, name = "")
+        } else {
+            // 选图是直接写库的（要先落盘拿到路径），草稿必须跟着更新，
+            // 否则点保存会把刚选的头像/立绘/背景又覆盖回旧值。
+            snapshot.value?.let { latest ->
+                if (latest.avatarUri != current.avatarUri ||
+                    latest.portraitUri != current.portraitUri ||
+                    latest.backgroundUri != current.backgroundUri
+                ) {
+                    draft = current.copy(
+                        avatarUri = latest.avatarUri,
+                        portraitUri = latest.portraitUri,
+                        backgroundUri = latest.backgroundUri,
+                    )
+                }
+            }
         }
     }
     var editingLore by remember { mutableStateOf<LoreEntity?>(null) }
@@ -92,6 +153,14 @@ fun CharacterEditScreen(
     val avatarPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) vm.setAvatar(characterId, uri) }
+
+    val portraitPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.setPortrait(characterId, uri) }
+
+    val backgroundPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.setCharacterBackground(characterId, uri) }
 
     val c = draft
     Scaffold(
@@ -145,6 +214,32 @@ fun CharacterEditScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            item {
+                SettingSection("配图", "立绘在首页大卡上显示，背景铺在聊天页后面") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ImageSlot(
+                            label = "立绘",
+                            imageUri = c.portraitUri,
+                            gradientKey = c.id,
+                            modifier = Modifier.weight(1f),
+                            onPick = { portraitPicker.launch(arrayOf("image/*")) },
+                        )
+                        ImageSlot(
+                            label = "聊天背景",
+                            imageUri = c.backgroundUri,
+                            gradientKey = c.id + "bg",
+                            modifier = Modifier.weight(1f),
+                            onPick = { backgroundPicker.launch(arrayOf("image/*")) },
+                        )
+                    }
+                    if (c.portraitUri != null || c.backgroundUri != null) {
+                        TextButton(onClick = {
+                            vm.clearCharacterImages(characterId, portrait = true, background = true)
+                        }) { Text("清掉这两张图") }
+                    }
                 }
             }
 

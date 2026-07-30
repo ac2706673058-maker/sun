@@ -91,9 +91,16 @@ private val MurmurTypography = Typography(
     labelSmall = body(11, 15, FontWeight.Medium),
 )
 
+/**
+ * 固定深色。
+ *
+ * 两个原因：一是这类应用整套视觉都建立在暗底 + 大图 + 半透明气泡上，浅色下背景图会糊成一片；
+ * 二是跟随系统时，设置还没从 DataStore 读回来的那一小段会露出接近纯白的 background，
+ * 冷启动或进程被回收后返回就是一屏白。
+ */
 @Composable
 fun MurmurTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val colors = if (darkTheme) DarkColors else LightColors
@@ -103,8 +110,8 @@ fun MurmurTheme(
             val window = (view.context as? Activity)?.window ?: return@SideEffect
             WindowCompat.setDecorFitsSystemWindows(window, false)
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !darkTheme
-                isAppearanceLightNavigationBars = !darkTheme
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
             }
         }
     }
@@ -119,4 +126,28 @@ object MurmurShape {
     val bubble = 20.dp
     val card = 18.dp
     val field = 14.dp
+}
+
+/**
+ * 没有配图时用来撑场面的一组渐变。
+ * 按角色 id 的哈希取，同一个角色每次进来颜色是稳定的。
+ */
+object Palette {
+    private val gradients: List<List<Color>> = listOf(
+        listOf(Color(0xFF6D3B6B), Color(0xFF2B1B3D)),
+        listOf(Color(0xFF2F4858), Color(0xFF1B2430)),
+        listOf(Color(0xFF7A4A3A), Color(0xFF2E1D22)),
+        listOf(Color(0xFF3B5A54), Color(0xFF19282A)),
+        listOf(Color(0xFF4A3A72), Color(0xFF1D1830)),
+        listOf(Color(0xFF74405A), Color(0xFF2A1A26)),
+    )
+
+    fun forKey(key: String): List<Color> {
+        if (key.isEmpty()) return gradients[0]
+        val h = key.fold(0) { acc, c -> (acc * 31 + c.code) and 0x7FFFFFFF }
+        return gradients[h % gradients.size]
+    }
+
+    fun accentFor(key: String, fallback: Color): Color =
+        if (key.isEmpty()) fallback else forKey(key).first()
 }

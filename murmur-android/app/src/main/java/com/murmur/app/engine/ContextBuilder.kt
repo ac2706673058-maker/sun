@@ -47,6 +47,8 @@ data class BudgetReport(
     val memoriesUsed: Int = 0,
 )
 
+enum class Perspective { CHARACTER, USER }
+
 data class BuiltPrompt(
     val messages: List<WireMessage>,
     val report: BudgetReport,
@@ -65,6 +67,12 @@ data class ContextInput(
     val profile: ApiProfileEntity,
     /** 追加到最后的一次性指令，如"继续写完"、"以我的身份写" */
     val oneShotDirective: String? = null,
+    /**
+     * 这一轮要以谁的身份输出。
+     * 代写时必须切成 [Perspective.USER]，否则末尾的锚点和尾部指令仍然在喊
+     * "只写 {{char}}"，权重又最高，代写指令会被整个盖掉 —— 表现就是"帮我想的话还是对方在说"。
+     */
+    val perspective: Perspective = Perspective.CHARACTER,
     /** 生成到第几条为止（重roll 时排除掉正在重写的那条） */
     val upToIdxExclusive: Long? = null,
 )
@@ -154,26 +162,38 @@ object ContextBuilder {
             )
         } else emptyList()
 
-        val anchorText = if (s.anchorEnabled) {
+        val sceneLines = PromptTemplates.SceneLines(
+            location = scene.location.nullIfBlank(),
+            time = scene.time.nullIfBlank(),
+            pose = scene.pose.nullIfBlank(),
+            outfit = scene.outfit.nullIfBlank(),
+            mood = scene.mood.nullIfBlank(),
+            threads = scene.threads.filter { it.isNotBlank() },
+        )
+
+        val anchorText = if (input.perspective == Perspective.USER) {
+            PromptTemplates.userAnchor(
+                charName = char.name,
+                userName = vars["user"] ?: "我",
+                personaLine = input.persona?.description?.lineSequence()?.firstOrNull()?.take(80).orEmpty(),
+                scene = sceneLines,
+            )
+        } else if (s.anchorEnabled) {
             PromptTemplates.anchor(
                 charName = char.name,
                 userName = vars["user"] ?: "对方",
                 identity = identityLine(char),
                 speechStyle = char.speechStyle.trim(),
-                scene = PromptTemplates.SceneLines(
-                    location = scene.location.nullIfBlank(),
-                    time = scene.time.nullIfBlank(),
-                    pose = scene.pose.nullIfBlank(),
-                    outfit = scene.outfit.nullIfBlank(),
-                    mood = scene.mood.nullIfBlank(),
-                    threads = scene.threads.filter { it.isNotBlank() },
-                ),
+                scene = sceneLines,
                 avoidPhrases = avoid,
                 lengthHint = PromptTemplates.LENGTH_HINTS[s.lengthHint] ?: "写 2–5 句",
             )
         } else ""
 
-        val postHistory = PromptTemplates.fill(s.postHistory, vars).trim()
+        val postHistory = PromptTemplates.fill(
+            if (input.perspective == Perspective.USER) PromptTemplates.USER_POST_HISTORY else s.postHistory,
+            vars,
+        ).trim()
 
         // ---- 预算 ----
         var cSystem = tk(systemCore)

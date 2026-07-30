@@ -6,11 +6,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.murmur.app.data.AppSettings
 import com.murmur.app.data.Repository
 import com.murmur.app.data.db.CharacterEntity
 import com.murmur.app.data.db.ChatEntity
 import com.murmur.app.data.db.MessageEntity
 import com.murmur.app.engine.BudgetReport
+import com.murmur.app.engine.Perspective
 import com.murmur.app.net.StreamEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -69,6 +71,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         ChatUiState(chat = chat, character = character, messages = msgs)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatUiState())
 
+    val appSettings = repo.settings.flow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
     var input by mutableStateOf("")
     var streamingText by mutableStateOf("")
         private set
@@ -84,9 +89,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var lastPromptPreview by mutableStateOf<String?>(null)
         private set
 
+    var suggestions by mutableStateOf<List<String>>(emptyList())
+        private set
+    var suggestionsLoading by mutableStateOf(false)
+        private set
+
     private var genJob: Job? = null
     private var drainJob: Job? = null
     private var maintenanceJob: Job? = null
+    private var suggestJob: Job? = null
     private var lastMode: GenMode? = null
     private val pending = StringBuilder()
     private var smoothing = true
@@ -98,6 +109,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         streamingText = ""
         reasoningText = ""
         error = null
+        suggestions = emptyList()
+        suggestJob?.cancel()
+        refreshSuggestions()
+    }
+
+    /** 候选回复：失败静默，绝不打断正常对话。 */
+    fun refreshSuggestions(force: Boolean = false) {
+        val id = chatId ?: return
+        suggestJob?.cancel()
+        suggestJob = viewModelScope.launch {
+            val app = repo.settings.get()
+            if (!app.suggestionsEnabled) { suggestions = emptyList(); return@launch }
+            if (!app.suggestionsAuto && !force) return@launch
+            suggestionsLoading = true
+            val result = runCatching { repo.generateSuggestions(id) }.getOrNull()
+            if (chatIdFlow.value == id) {
+                result?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { suggestions = it }
+            }
+            suggestionsLoading = false
+        }
+    }
+
+    /** 点了某个候选：直接当成自己说的话发出去。 */
+    fun sendSuggestion(text: String) {
+        if (isGenerating) return
+        input = text
+        send()
+    }
+
+    /** 想改一改再发：填进输入框，不直接发送。 */
+    fun editSuggestion(text: String) {
+        input = if (input.isBlank()) text else input.trimEnd() + " " + text
+        suggestions = emptyList()
     }
 
     fun send() {
@@ -149,6 +193,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         isGenerating = true
         generatingMode = mode
         lastMode = mode
+        // 一旦开始生成，上一批候选就过期了
+        suggestions = emptyList()
+        suggestJob?.cancel()
 
         genJob = viewModelScope.launch {
             val startedAt = System.currentTimeMillis()
@@ -166,7 +213,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 else -> null
             }
 
-            val pair = repo.buildPrompt(id, upToExclusive, directive)
+            // 代写必须整体切到"我"的视角：只塞一条指令是没用的，
+            // 末尾的锚点和尾部指令权重更高，会把它盖掉。
+            val perspective =
+                if (mode is GenMode.Impersonate) Perspective.USER else Perspective.CHARACTER
+            val pair = repo.buildPrompt(id, upToExclusive, directive, perspective)
             if (pair == null) {
                 error = "还没配置接口。到「设置 → 接口」里填一下地址、Key 和模型。"
                 isGenerating = false
@@ -208,7 +259,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 commit(id, mode, produced, profile.model, elapsed)
                 streamingText = ""
                 reasoningText = ""
-                if (mode !is GenMode.Impersonate) scheduleMaintenance(id)
+                if (mode !is GenMode.Impersonate) {
+                    scheduleMaintenance(id)
+                    refreshSuggestions()
+                }
             } else if (failed && produced.isNotEmpty()) {
                 // 中途断了但已经有内容：留下来，别让用户白等
                 commit(id, mode, produced, profile.model, elapsed)

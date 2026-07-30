@@ -106,8 +106,44 @@ object PromptTemplates {
 - 不要评论，不要写"总结如下"之类的开场，不要分点。
 - 舍弃寒暄和重复内容。"""
 
-    const val IMPERSONATE = """以 {{user}} 的身份写一句回复。只写 {{user}} 的言行，不要写 {{char}} 的部分，不要解释。
-沿用当前对话的文体：动作用 *星号* 包裹，对白直接写。1–3 句即可。"""
+    const val IMPERSONATE = """现在换你来演 {{user}}。
+只写 {{user}} 的言行，绝不要写 {{char}} 的任何台词、动作或心理。
+沿用当前对话的文体：动作用 *星号* 包裹，对白直接写。1–3 句即可，不要解释。"""
+
+    /**
+     * 视角切到 {{user}} 时的尾部指令。
+     * 必须替换掉常规的尾部指令 —— 那句「只写 {{char}}」在最末尾、权重最高，
+     * 会把前面的代写要求整个盖掉，结果就是模型仍然以角色的身份说话。
+     */
+    const val USER_POST_HISTORY =
+        """（接下来只输出 {{user}} 要说的话和做的动作。不要写 {{char}} 的任何反应，不要输出解释或旁白说明。）"""
+
+    /** 视角切到 {{user}} 时的锚点，同样要把「你是 {{char}}」整个换掉。 */
+    fun userAnchor(charName: String, userName: String, personaLine: String, scene: SceneLines): String =
+        buildString {
+            appendLine("[ 内部信息，不要复述本段 ]")
+            appendLine("你现在扮演的是 $userName —— 也就是一直在和 $charName 对话的那一方。")
+            if (personaLine.isNotBlank()) appendLine("$userName 是：$personaLine")
+            scene.location?.let { appendLine("当前所在：$it") }
+            scene.pose?.let { appendLine("此刻的姿态与距离：$it") }
+            if (scene.threads.isNotEmpty()) {
+                appendLine("悬而未决：" + scene.threads.joinToString("；"))
+            }
+            append("站在 $userName 的立场往下说。只写 $userName，不写 $charName 的言行。")
+        }
+
+    /** 实时生成三个候选回复。刻意要求三个方向岔开，否则模型会给出三句同义的废话。 */
+    const val SUGGESTIONS = """你是 {{user}}。读完下面这段对话，站在 {{user}} 的立场，想三句"你接下来可能会说的话"。
+
+硬性要求：
+1. 三条的方向必须明显不同。比如：一条顺着对方接下去、一条反问或试探、一条岔开话题或主动推进。不要三条一个意思。
+2. 每条都是 {{user}} 要说出口的话本身，不是对这句话的描述。不要写成"询问她的过去"这种旁白。
+3. 每条 8–30 字。可以带一点动作，用 *星号* 包裹，但以对白为主。
+4. 绝对不要写 {{char}} 的任何言行、反应或心理。
+5. 语气要贴合 {{user}} 的人设和此刻的气氛。
+
+只输出一个 JSON 数组，三个字符串，不要代码块标记，不要任何其他文字。
+示例格式：["第一句","第二句","第三句"]"""
 
     /** 变量替换。 */
     fun fill(template: String, vars: Map<String, String>): String {
