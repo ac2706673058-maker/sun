@@ -115,6 +115,10 @@ private fun MurmurRoot() {
                     chatVm.open(id)
                     nav.navigate(Routes.chat(id))
                 },
+                onStartScenario = { id ->
+                    chatVm.openAndKickoff(id)
+                    nav.navigate(Routes.chat(id))
+                },
                 onEditCharacter = { nav.navigate(Routes.character(it)) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
             )

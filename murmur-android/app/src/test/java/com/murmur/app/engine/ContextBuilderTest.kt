@@ -388,6 +388,44 @@ class ContextBuilderTest {
         assertTrue(built.messages.last().content.contains("只写 林晚"))
     }
 
+    // ---- 旁白 / 图片 / 亲密度 ----
+
+    @Test
+    fun `narration rides along as a system message inside history`() {
+        val history = msgs(4).toMutableList()
+        history[2] = history[2].copy(role = "system", swipes = listOf("【旁白】外面突然下起了大雨。"))
+        val built = ContextBuilder.build(input(history))
+        val narration = built.messages.first { it.content.contains("下起了大雨") }
+        assertEquals("旁白必须以 system 身份进上下文，而不是伪装成某一方说的话", "system", narration.role)
+    }
+
+    @Test
+    fun `images attach to the message that carries them`() {
+        val history = msgs(4).toMutableList()
+        history[3] = history[3].copy(role = "user", imageUri = "/data/pic.jpg", swipes = listOf("你看这个"))
+        val built = ContextBuilder.build(input(history))
+        val withImage = built.messages.first { it.content == "你看这个" }
+        assertEquals(listOf("/data/pic.jpg"), withImage.images)
+        assertTrue("其它消息不该被带上图片", built.messages.filter { it.images.isNotEmpty() }.size == 1)
+    }
+
+    @Test
+    fun `affinity and relationship stage reach the anchor`() {
+        val built = ContextBuilder.build(
+            input(msgs(6), chat = chat().copy(affinity = 64, relationshipStage = "开始放下防备"))
+        )
+        val anchor = built.messages.first { it.content.startsWith("[ 场景锚") }.content
+        assertTrue(anchor.contains("开始放下防备"))
+        assertTrue(anchor.contains("64/100"))
+    }
+
+    @Test
+    fun `anchor omits relationship when it has not been established yet`() {
+        val built = ContextBuilder.build(input(msgs(4), chat = chat()))
+        val anchor = built.messages.first { it.content.startsWith("[ 场景锚") }.content
+        assertFalse("还没评估出关系时不该硬塞一行空的进去", anchor.contains("亲近度"))
+    }
+
     @Test
     fun `empty chat still produces a valid prompt`() {
         val built = ContextBuilder.build(input(emptyList()))

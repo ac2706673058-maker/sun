@@ -29,7 +29,12 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 @Serializable
-data class WireMessage(val role: String, val content: String)
+data class WireMessage(
+    val role: String,
+    val content: String,
+    /** 随这条消息一起发的图片路径。非空且端点支持读图时，content 会改用数组形式 */
+    val images: List<String> = emptyList(),
+)
 
 sealed interface StreamEvent {
     /** 正文增量 */
@@ -271,10 +276,31 @@ class OpenAiClient {
         val base = buildJsonObject {
             put("model", model)
             put("messages", buildJsonArray {
-                messages.forEach {
+                messages.forEach { m ->
                     add(buildJsonObject {
-                        put("role", it.role)
-                        put("content", it.content)
+                        put("role", m.role)
+                        val pics = if (p.visionEnabled) m.images else emptyList()
+                        if (pics.isEmpty()) {
+                            put("content", m.content)
+                        } else {
+                            // 多模态格式：content 变成 [{type:text},{type:image_url}]
+                            put("content", buildJsonArray {
+                                if (m.content.isNotBlank()) {
+                                    add(buildJsonObject {
+                                        put("type", "text")
+                                        put("text", m.content)
+                                    })
+                                }
+                                pics.forEach { path ->
+                                    ImageCodec.toDataUri(path)?.let { uri ->
+                                        add(buildJsonObject {
+                                            put("type", "image_url")
+                                            put("image_url", buildJsonObject { put("url", uri) })
+                                        })
+                                    }
+                                }
+                            })
+                        }
                     })
                 }
             })

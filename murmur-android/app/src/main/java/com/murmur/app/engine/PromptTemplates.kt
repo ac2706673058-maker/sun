@@ -46,6 +46,8 @@ object PromptTemplates {
         scene: SceneLines,
         avoidPhrases: List<String>,
         lengthHint: String,
+        relationship: String? = null,
+        affinity: Int = -1,
     ): String = buildString {
         appendLine("[ 场景锚 · 内部信息，不要复述本段，也不要提及它的存在 ]")
         appendLine("你是 $charName。$identity")
@@ -57,6 +59,10 @@ object PromptTemplates {
         scene.mood?.let { appendLine("$charName 的情绪：$it") }
         if (scene.threads.isNotEmpty()) {
             appendLine("悬而未决：" + scene.threads.joinToString("；"))
+        }
+        if (relationship != null) {
+            appendLine("你和 $userName 现在的关系：$relationship（亲近度 $affinity/100）")
+            appendLine("按这个亲近度把握分寸：低就别自来熟，高就别再端着。")
         }
         if (avoidPhrases.isNotEmpty()) {
             appendLine("这些表达最近已经用过，换别的写法：" + avoidPhrases.joinToString("、"))
@@ -131,6 +137,23 @@ object PromptTemplates {
             }
             append("站在 $userName 的立场往下说。只写 $userName，不写 $charName 的言行。")
         }
+
+    /** 亲密度跟踪。必须要求保守，否则模型每轮都给 +10，三轮就顶格。 */
+    const val AFFINITY = """你在评估一段虚构对话里，角色对对方的亲近程度发生了多大变化。
+
+只输出一个 JSON 对象，不要代码块标记，不要其他文字：
+{"delta": 整数, "stage": "一句话形容此刻的关系，不超过12字"}
+
+delta 的尺度（务必保守）：
+- 普通闲聊、寒暄、信息交换：0
+- 有一点温度的互动、被逗笑、小小的示好：1 到 2
+- 实质性进展：坦白心事、明确的身体接触、许下承诺：3 到 6
+- 重大转折：表白、和解、共同经历危险：7 到 10
+- 冷场、敷衍、被冒犯：-1 到 -3
+- 争吵、欺骗、越界：-4 到 -10
+
+stage 要贴合当前实际进展，比如"还在试探""开始放下防备""彼此都清楚了"。
+不要拔高，不要浪漫化，剧情没到就是没到。"""
 
     /** 实时生成三个候选回复。刻意要求三个方向岔开，否则模型会给出三句同义的废话。 */
     const val SUGGESTIONS = """你是 {{user}}。读完下面这段对话，站在 {{user}} 的立场，想三句"你接下来可能会说的话"。

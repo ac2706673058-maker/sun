@@ -43,6 +43,9 @@ data class AppSettings(
     /** 每这么多轮对话抽一次长期记忆 */
     val memoryEveryNTurns: Int = 4,
 
+    /** 亲密度跟踪：每轮后台评估关系进展，结果进锚点影响分寸 */
+    val affinityEnabled: Boolean = true,
+
     // 候选回复
     val suggestionsEnabled: Boolean = true,
     /** 每轮角色回复结束后自动生成，关掉则改为手动点一下才生成 */

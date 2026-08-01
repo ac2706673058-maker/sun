@@ -1,14 +1,23 @@
 package com.murmur.app.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
@@ -81,6 +90,51 @@ fun ChatBackdrop(
                 )
         )
         content()
+    }
+}
+
+/**
+ * 首页背后缓慢流动的极光。
+ *
+ * 用几团大半径的径向渐变错峰漂移来做，不用 blur——
+ * RenderEffect 要 API 31，而且实时模糊在中端机上很贵。
+ * 半径开得足够大时，径向渐变本身就是软的，观感一样而且几乎不耗电。
+ */
+@Composable
+fun AuroraBackground(modifier: Modifier = Modifier, seed: String = "") {
+    val transition = rememberInfiniteTransition(label = "aurora")
+    val t by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(38_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "t",
+    )
+    val palette = remember(seed) { Palette.forKey(seed) }
+    val warm = MaterialTheme.colorScheme.primary
+    val cool = MaterialTheme.colorScheme.secondary
+
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+
+        fun blob(cx: Float, cy: Float, r: Float, color: Color, alpha: Float) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(color.copy(alpha = alpha), Color.Transparent),
+                    center = Offset(cx, cy),
+                    radius = r,
+                ),
+                radius = r,
+                center = Offset(cx, cy),
+            )
+        }
+
+        blob(w * (0.18f + 0.16f * t), h * (0.10f + 0.05f * t), w * 0.85f, warm, 0.30f)
+        blob(w * (0.92f - 0.22f * t), h * (0.04f + 0.10f * t), w * 0.70f, palette[0], 0.34f)
+        blob(w * (0.55f + 0.10f * (1 - t)), h * (0.30f - 0.08f * t), w * 0.60f, cool, 0.16f)
     }
 }
 

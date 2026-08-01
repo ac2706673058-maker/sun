@@ -187,6 +187,8 @@ object ContextBuilder {
                 scene = sceneLines,
                 avoidPhrases = avoid,
                 lengthHint = PromptTemplates.LENGTH_HINTS[s.lengthHint] ?: "写 2–5 句",
+                relationship = input.chat.relationshipStage.takeIf { it.isNotBlank() },
+                affinity = input.chat.affinity,
             )
         } else ""
 
@@ -306,7 +308,13 @@ object ContextBuilder {
         val insertAt = (included.size - depth).coerceIn(0, included.size)
         included.forEachIndexed { i, m ->
             if (i == insertAt && anchorText.isNotBlank()) out.add(WireMessage("system", anchorText))
-            out.add(WireMessage(wireRole(m.role), m.content))
+            out.add(
+                WireMessage(
+                    role = wireRole(m.role),
+                    content = m.content,
+                    images = listOfNotNull(m.imageUri),
+                )
+            )
         }
         if (insertAt >= included.size && anchorText.isNotBlank()) {
             out.add(WireMessage("system", anchorText))

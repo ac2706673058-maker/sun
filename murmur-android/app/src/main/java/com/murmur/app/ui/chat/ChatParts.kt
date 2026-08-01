@@ -1,11 +1,14 @@
 package com.murmur.app.ui.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -26,8 +30,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -61,12 +68,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.murmur.app.data.db.MessageEntity
 import com.murmur.app.engine.BudgetReport
+import com.murmur.app.ui.components.CoverArt
 
 @Composable
 fun ChatInputBar(
@@ -79,11 +88,41 @@ fun ChatInputBar(
     onImpersonate: () -> Unit,
     onContinue: () -> Unit,
     onSuggest: () -> Unit,
+    onPickImage: () -> Unit,
+    onDirector: () -> Unit,
+    pendingImage: String?,
+    onClearImage: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
     // 半透明，让背景图透上来一点，但要足够实以保证输入区可读
     Surface(color = MaterialTheme.colorScheme.background.copy(alpha = 0.88f)) {
+      Column {
+        // 待发送的图片：发出去之前一直挂在输入框上方
+        pendingImage?.let { path ->
+            Box(Modifier.padding(start = 14.dp, top = 10.dp)) {
+                Box(
+                    Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                ) {
+                    CoverArt(path, path, Modifier.fillMaxSize())
+                }
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable(onClick = onClearImage),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Close, "取消这张图", Modifier.size(13.dp))
+                }
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -118,6 +157,17 @@ fun ChatInputBar(
                         text = { Text("给我几个选项") },
                         leadingIcon = { Icon(Icons.Default.Lightbulb, null) },
                         onClick = { menuOpen = false; onSuggest() },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("发一张图片") },
+                        leadingIcon = { Icon(Icons.Default.Image, null) },
+                        onClick = { menuOpen = false; onPickImage() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("导演模式") },
+                        leadingIcon = { Icon(Icons.Default.MovieFilter, null) },
+                        onClick = { menuOpen = false; onDirector() },
                     )
                 }
             }
@@ -157,6 +207,7 @@ fun ChatInputBar(
                 )
             }
         }
+      }
     }
 }
 

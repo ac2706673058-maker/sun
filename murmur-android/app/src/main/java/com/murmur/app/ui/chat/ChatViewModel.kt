@@ -1,6 +1,7 @@
 package com.murmur.app.ui.chat
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,8 +15,10 @@ import com.murmur.app.data.db.MessageEntity
 import com.murmur.app.engine.BudgetReport
 import com.murmur.app.engine.Perspective
 import com.murmur.app.net.StreamEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -89,6 +92,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var lastPromptPreview by mutableStateOf<String?>(null)
         private set
 
+    /** 待发送的图片（应用私有目录里的路径） */
+    var pendingImage by mutableStateOf<String?>(null)
+        private set
+    var improvising by mutableStateOf(false)
+        private set
+
     var suggestions by mutableStateOf<List<String>>(emptyList())
         private set
     var suggestionsLoading by mutableStateOf(false)
@@ -112,6 +121,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         suggestions = emptyList()
         suggestJob?.cancel()
         refreshSuggestions()
+    }
+
+    /**
+     * 自定义开局用：打开会话，若里面还没有任何角色发言（只有一段情境旁白），
+     * 就立刻让角色对这个处境作出第一反应。
+     */
+    fun openAndKickoff(id: String) {
+        open(id)
+        viewModelScope.launch {
+            val msgs = repo.messages.listForChat(id)
+            if (msgs.none { it.role == "assistant" }) generate(GenMode.New)
+        }
     }
 
     /** 候选回复：失败静默，绝不打断正常对话。 */
@@ -146,12 +167,60 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun send() {
         val text = input.trim()
-        if (text.isEmpty() || isGenerating) return
+        val image = pendingImage
+        if ((text.isEmpty() && image == null) || isGenerating) return
         input = ""
+        pendingImage = null
         val id = chatId ?: return
         viewModelScope.launch {
-            repo.appendMessage(id, "user", text)
+            repo.appendMessage(id, "user", text, imageUri = image)
             generate(GenMode.New)
+        }
+    }
+
+    /** 选好的图先落盘再挂到输入框上，发送时随消息一起走。 */
+    fun attachImage(uri: Uri) {
+        val id = chatId ?: return
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.use { it.readBytes() }
+                }.getOrNull()
+            } ?: run { error = "读不到这张图。"; return@launch }
+            pendingImage = repo.saveChatImage(id, bytes)
+            if (pendingImage == null) error = "存不下这张图，可能是空间不够。"
+        }
+    }
+
+    fun clearPendingImage() {
+        pendingImage = null
+    }
+
+    /** 导演模式：投放一段旁白，然后让角色对它作出反应。 */
+    fun narrate(text: String) {
+        val id = chatId ?: return
+        if (text.isBlank() || isGenerating) return
+        viewModelScope.launch {
+            repo.addNarration(id, text)
+            generate(GenMode.New)
+        }
+    }
+
+    /** 让模型自己想一个契合当下场景的转折，再投放进去。 */
+    fun randomEvent() {
+        val id = chatId ?: return
+        if (isGenerating) return
+        viewModelScope.launch {
+            improvising = true
+            val event = runCatching { repo.improviseEvent(id) }.getOrNull()
+            improvising = false
+            if (event.isNullOrBlank()) {
+                error = "没能想出合适的事件，再试一次，或者自己写一句。"
+            } else {
+                repo.addNarration(id, event)
+                generate(GenMode.New)
+            }
         }
     }
 

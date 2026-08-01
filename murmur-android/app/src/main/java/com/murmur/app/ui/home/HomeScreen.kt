@@ -63,6 +63,7 @@ import com.murmur.app.data.db.CharacterEntity
 import com.murmur.app.data.db.ChatEntity
 import com.murmur.app.ui.AppViewModel
 import com.murmur.app.ui.components.Avatar
+import com.murmur.app.ui.components.AuroraBackground
 import com.murmur.app.ui.components.CoverArt
 import com.murmur.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -73,6 +74,7 @@ import java.util.Calendar
 fun HomeScreen(
     vm: AppViewModel,
     onOpenChat: (String) -> Unit,
+    onStartScenario: (String) -> Unit,
     onEditCharacter: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -82,6 +84,7 @@ fun HomeScreen(
     val snackbar = remember { SnackbarHostState() }
     var addMenu by remember { mutableStateOf(false) }
     var pressedCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
+    var startFor by remember { mutableStateOf<CharacterEntity?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -97,6 +100,8 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
+        Box(Modifier.fillMaxSize()) {
+        AuroraBackground(Modifier.fillMaxWidth().height(420.dp))
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 36.dp),
@@ -160,6 +165,22 @@ fun HomeScreen(
                 }
             }
         }
+        }
+    }
+
+    startFor?.let { c ->
+        StartSheet(
+            character = c,
+            onDismiss = { startFor = null },
+            onGreeting = { idx ->
+                startFor = null
+                scope.launch { onOpenChat(vm.newChat(c.id, idx)) }
+            },
+            onScenario = { text ->
+                startFor = null
+                scope.launch { onStartScenario(vm.newChatWithScenario(c.id, text)) }
+            },
+        )
     }
 
     pressedCharacter?.let { c ->
@@ -168,8 +189,8 @@ fun HomeScreen(
             onDismiss = { pressedCharacter = null },
             onEdit = { onEditCharacter(c.id); pressedCharacter = null },
             onNewChat = {
-                scope.launch { onOpenChat(vm.newChat(c.id)) }
                 pressedCharacter = null
+                startFor = c
             },
             onDuplicate = {
                 scope.launch { vm.duplicateCharacter(c.id) }
@@ -476,7 +497,7 @@ private fun CharacterActionsDialog(
         text = {
             Column {
                 DialogRow("编辑人设与配图", onEdit)
-                DialogRow("重新开一段对话", onNewChat)
+                DialogRow("换个开局，重新聊", onNewChat)
                 DialogRow("复制一份", onDuplicate)
                 DialogRow("删除角色", onDelete, destructive = true)
             }

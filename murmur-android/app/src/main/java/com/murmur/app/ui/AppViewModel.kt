@@ -65,6 +65,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun newChat(characterId: String, greetingIndex: Int = 0): String =
         repo.createChat(characterId, greetingIndex)
 
+    /** 自定义开局：不用角色自带的开场白，直接从一段情境开始。 */
+    suspend fun newChatWithScenario(characterId: String, scenario: String): String =
+        repo.createChat(characterId, openingScenario = scenario)
+
+    suspend fun getCharacter(id: String) = repo.characters.get(id)
+
     suspend fun mostRecentChatId(): String? = repo.chats.mostRecent()?.id
 
     fun deleteChat(id: String) = viewModelScope.launch { repo.deleteChat(id) }

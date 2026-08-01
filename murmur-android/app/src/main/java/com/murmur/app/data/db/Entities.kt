@@ -99,6 +99,10 @@ data class ChatEntity(
     val memoryScannedUpToIdx: Long = -1,
     /** 这段对话专属的背景，优先级高于角色背景 */
     val backgroundUri: String? = null,
+    /** 亲密度 0..100，由后台按对话进展增减 */
+    val affinity: Int = 12,
+    /** 一句话描述此刻的关系，进锚点 */
+    val relationshipStage: String = "",
 )
 
 @Entity(
@@ -122,6 +126,8 @@ data class MessageEntity(
     val model: String? = null,
     /** 生成耗时（毫秒），用于显示 */
     val elapsedMs: Long = 0,
+    /** 随消息发出的图片（应用私有目录里的绝对路径） */
+    val imageUri: String? = null,
 ) {
     val content: String get() = swipes.getOrElse(activeSwipe) { "" }
 }
@@ -186,6 +192,8 @@ data class ApiProfileEntity(
     val stream: Boolean = true,
     /** 部分端点不接受多条 system 消息，打开后合并成一条 */
     val mergeSystemMessages: Boolean = false,
+    /** 模型支持读图时打开，图片会以 base64 data URI 随消息发出 */
+    val visionEnabled: Boolean = false,
     /** 发送 temperature 之外的采样参数（有些端点会因未知字段 400） */
     val sendAdvancedSampling: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),

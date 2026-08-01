@@ -305,6 +305,11 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersona: () -> Un
                         p.sendAdvancedSampling,
                     ) { save(p.copy(sendAdvancedSampling = it)) }
                     SettingSwitch(
+                        "模型支持读图",
+                        "打开后发出的图片会压到 1024px 再以 base64 随消息发送。模型不支持读图时开了会报错",
+                        p.visionEnabled,
+                    ) { save(p.copy(visionEnabled = it)) }
+                    SettingSwitch(
                         "合并 system 消息",
                         "有些端点只接受一条 system。开了之后锚点会改成方括号旁注",
                         p.mergeSystemMessages,
@@ -356,6 +361,11 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersona: () -> Un
                         "被挤出窗口的旧对话压缩成前情提要，而不是直接丢掉",
                         settings.summaryEnabled,
                     ) { v -> vm.updateSettings { it.copy(summaryEnabled = v) } }
+                    SettingSwitch(
+                        "亲密度跟踪",
+                        "每轮后台评估关系进展，结果写进锚点影响角色的分寸感。数值显示在聊天页顶部",
+                        settings.affinityEnabled,
+                    ) { v -> vm.updateSettings { it.copy(affinityEnabled = v) } }
                     SettingSwitch(
                         "复读检测",
                         "发现角色开始重复用词时，在锚点里点名让它换个说法",

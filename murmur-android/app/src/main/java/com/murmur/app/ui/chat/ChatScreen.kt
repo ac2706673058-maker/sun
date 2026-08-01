@@ -1,5 +1,7 @@
 package com.murmur.app.ui.chat
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -70,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.murmur.app.data.db.MessageEntity
 import com.murmur.app.ui.components.Avatar
 import com.murmur.app.ui.components.ChatBackdrop
+import com.murmur.app.ui.components.CoverArt
 import com.murmur.app.ui.components.EdgeFade
 import com.murmur.app.ui.components.RoleplayText
 import com.murmur.app.ui.components.TypingDots
@@ -97,6 +101,11 @@ fun ChatScreen(
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var editTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var directorOpen by remember { mutableStateOf(false) }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.attachImage(uri) }
 
     val visible = remember(state.messages) { state.messages.filter { it.content.isNotBlank() } }
     val reversed = remember(visible) { visible.asReversed() }
@@ -146,11 +155,22 @@ fun ChatScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    Text(
-                                        if (vm.isGenerating) "正在回复…" else "${visible.size} 条消息",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                    val chat = state.chat
+                                    if (settings.affinityEnabled && chat != null &&
+                                        chat.relationshipStage.isNotBlank()
+                                    ) {
+                                        AffinityLine(
+                                            stage = chat.relationshipStage,
+                                            affinity = chat.affinity,
+                                            generating = vm.isGenerating,
+                                        )
+                                    } else {
+                                        Text(
+                                            if (vm.isGenerating) "正在回复…" else "${visible.size} 条消息",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -213,6 +233,10 @@ fun ChatScreen(
                                 ?.let { vm.continueMessage(it.id) }
                         },
                         onSuggest = { vm.refreshSuggestions(force = true) },
+                        onPickImage = { imagePicker.launch(arrayOf("image/*")) },
+                        onDirector = { directorOpen = true },
+                        pendingImage = vm.pendingImage,
+                        onClearImage = { vm.clearPendingImage() },
                     )
                 }
             },
@@ -240,6 +264,16 @@ fun ChatScreen(
                     }
                     messageItems(reversed) { indexInReversed, msg ->
                         val isLast = indexInReversed == 0
+                        if (msg.role == "system") {
+                            NarrationBubble(
+                                text = msg.content,
+                                onLongPress = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    actionTarget = msg
+                                },
+                            )
+                            return@messageItems
+                        }
                         MessageBubble(
                             message = msg,
                             characterName = state.character?.name.orEmpty(),
@@ -307,6 +341,15 @@ fun ChatScreen(
             initial = target.content,
             onDismiss = { editTarget = null },
             onConfirm = { vm.editMessage(target.id, it); editTarget = null },
+        )
+    }
+
+    if (directorOpen) {
+        DirectorSheet(
+            improvising = vm.improvising,
+            onDismiss = { directorOpen = false },
+            onNarrate = { directorOpen = false; vm.narrate(it) },
+            onRandom = { directorOpen = false; vm.randomEvent() },
         )
     }
 
@@ -400,6 +443,17 @@ private fun MessageBubble(
                     ),
             ) {
                 Column(Modifier.padding(horizontal = 15.dp, vertical = 11.dp)) {
+                    message.imageUri?.let { path ->
+                        Box(
+                            Modifier
+                                .padding(bottom = if (message.content.isBlank()) 0.dp else 8.dp)
+                                .widthIn(max = 240.dp)
+                                .heightIn(max = 300.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            CoverArt(path, path, Modifier.fillMaxWidth().height(180.dp))
+                        }
+                    }
                     if (message.pinned) {
                         Text(
                             "已固定在上下文",
@@ -454,6 +508,88 @@ private fun MessageBubble(
             }
         }
         if (isUser) Spacer(Modifier.width(6.dp))
+    }
+}
+
+/**
+ * 旁白：居中、窄、压暗，和两侧的对话气泡明确区分开。
+ * 它代表"世界发生的事"，不属于任何一方，所以不给头像也不靠边。
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun NarrationBubble(text: String, onLongPress: () -> Unit) {
+    val body = text.removePrefix("【旁白】").trim()
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        Row(
+            Modifier
+                .widthIn(max = 300.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.62f))
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f),
+                    RoundedCornerShape(13.dp),
+                )
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                )
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(3.dp, 14.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f))
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 亲密度：一条细进度条 + 一句关系描述，放在角色名下面。 */
+@Composable
+private fun AffinityLine(stage: String, affinity: Int, generating: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (generating) "正在回复…" else stage,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 120.dp),
+        )
+        Spacer(Modifier.width(7.dp))
+        Box(
+            Modifier
+                .width(38.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(affinity.coerceIn(0, 100) / 100f)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.tertiary,
+                                MaterialTheme.colorScheme.primary,
+                            )
+                        )
+                    )
+            )
+        }
     }
 }
 

@@ -10,6 +10,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 
 @Serializable
+data class AffinityDelta(
+    val delta: Int = 0,
+    val stage: String = "",
+)
+
+@Serializable
 data class ExtractedMemory(
     val text: String = "",
     val category: String = "事实",
@@ -59,6 +65,81 @@ class ContextMaintainer(private val client: OpenAiClient) {
             mood = parsed.mood.ifBlank { previous.mood },
             threads = parsed.threads.filter { it.isNotBlank() }.ifEmpty { previous.threads }.take(3),
         )
+    }
+
+    /**
+     * 亲密度增量。
+     * 返回 null 表示这一轮不动 —— 判不出来就别动，比乱加乱减好。
+     */
+    suspend fun trackAffinity(
+        profile: ApiProfileEntity,
+        charName: String,
+        userName: String,
+        current: Int,
+        currentStage: String,
+        recent: List<MessageEntity>,
+    ): Pair<Int, String>? {
+        if (recent.size < 2) return null
+        val prompt = buildString {
+            appendLine(PromptTemplates.AFFINITY)
+            appendLine()
+            appendLine("角色：$charName　对方：$userName")
+            appendLine("当前亲近度：$current/100" + if (currentStage.isNotBlank()) "（$currentStage）" else "")
+            appendLine()
+            appendLine("最近的对话：")
+            appendLine(transcript(recent.takeLast(6), charName, userName))
+        }
+        val raw = client.complete(
+            profile = profile,
+            messages = listOf(WireMessage("user", prompt)),
+            model = profile.utilityModel.ifBlank { profile.model },
+            maxTokens = 160,
+            temperature = 0.25f,
+        ).getOrNull() ?: return null
+
+        val json = extractJsonObject(raw) ?: return null
+        val parsed = runCatching { AppJson.decodeFromString<AffinityDelta>(json) }.getOrNull() ?: return null
+        // 单轮最多动 10 点，防止模型一次给个 +80 把进度条冲顶
+        val delta = parsed.delta.coerceIn(-10, 10)
+        val next = (current + delta).coerceIn(0, 100)
+        val stage = parsed.stage.trim().take(16).ifBlank { currentStage }
+        return next to stage
+    }
+
+    /**
+     * 即兴生成一个契合当下场景的转折事件（导演模式的"随机来点什么"）。
+     * 要求它作用于环境或第三方，而不是替角色决定情绪 —— 否则就成了越俎代庖。
+     */
+    suspend fun improviseEvent(
+        profile: ApiProfileEntity,
+        charName: String,
+        userName: String,
+        scene: SceneState,
+        recent: List<MessageEntity>,
+    ): String? {
+        val prompt = buildString {
+            appendLine("给下面这段虚构对话投放一个突发事件，用来打破当前节奏。")
+            appendLine()
+            appendLine("要求：")
+            appendLine("- 只写发生了什么，一到两句，第三人称，客观陈述。")
+            appendLine("- 作用在环境、外部或第三方身上（天气、来电、断电、有人闯入、东西摔了、消息传来）。")
+            appendLine("- 不要替 $charName 或 $userName 决定反应、情绪或台词。")
+            appendLine("- 要贴合此刻的地点和气氛，不要凭空跳到别的场景。")
+            appendLine("- 直接输出那句话，不要引号，不要解释，不要编号。")
+            appendLine()
+            if (!scene.isEmpty) {
+                appendLine("此刻：${scene.location}｜${scene.time}｜${scene.pose}")
+            }
+            appendLine("最近的对话：")
+            appendLine(transcript(recent.takeLast(6), charName, userName))
+        }
+        return client.complete(
+            profile = profile,
+            messages = listOf(WireMessage("user", prompt)),
+            model = profile.utilityModel.ifBlank { profile.model },
+            maxTokens = 150,
+            temperature = 1.05f,
+        ).getOrNull()?.trim()?.trim('"', '「', '」')?.takeIf { it.isNotBlank() }
     }
 
     suspend fun extractMemories(

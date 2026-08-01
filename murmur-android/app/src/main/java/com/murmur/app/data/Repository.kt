@@ -71,7 +71,15 @@ class Repository private constructor(private val appContext: Context) {
 
     // ---- 会话 ----
 
-    suspend fun createChat(characterId: String, greetingIndex: Int = 0): String {
+    /**
+     * @param openingScenario 非空时跳过开场白，改成投放一段情境旁白，
+     *        由调用方触发第一次生成 —— 同一个角色可以从完全不同的处境开局。
+     */
+    suspend fun createChat(
+        characterId: String,
+        greetingIndex: Int = 0,
+        openingScenario: String? = null,
+    ): String {
         val char = db.characters().get(characterId) ?: return ""
         val persona = activePersona()
         val chatId = UUID.randomUUID().toString()
@@ -86,6 +94,10 @@ class Repository private constructor(private val appContext: Context) {
                 updatedAt = now,
             )
         )
+        if (!openingScenario.isNullOrBlank()) {
+            addNarration(chatId, openingScenario)
+            return chatId
+        }
         val greeting = if (greetingIndex == 0) char.firstMessage
         else char.alternateGreetings.getOrElse(greetingIndex - 1) { char.firstMessage }
         if (greeting.isNotBlank()) {
@@ -132,6 +144,7 @@ class Repository private constructor(private val appContext: Context) {
         content: String,
         model: String? = null,
         elapsedMs: Long = 0,
+        imageUri: String? = null,
     ): MessageEntity {
         val idx = db.messages().maxIdx(chatId) + 1
         val m = MessageEntity(
@@ -143,11 +156,23 @@ class Repository private constructor(private val appContext: Context) {
             activeSwipe = 0,
             model = model,
             elapsedMs = elapsedMs,
+            imageUri = imageUri,
         )
         db.messages().insert(m)
-        touchChat(chatId, content)
+        touchChat(chatId, content.ifBlank { if (imageUri != null) "[图片]" else "" })
         return m
     }
+
+    /**
+     * 旁白 / 导演插话。
+     * 存成 role=system 的消息，装配上下文时天然就是一条 system —— 不用给引擎开特例，
+     * 而模型会把它当成"世界发生的事"而不是某个人说的话。
+     */
+    suspend fun addNarration(chatId: String, text: String): MessageEntity =
+        appendMessage(chatId, "system", "【旁白】" + text.trim())
+
+    suspend fun saveChatImage(chatId: String, bytes: ByteArray): String? =
+        saveImage("chat-images", "$chatId-${UUID.randomUUID()}", bytes)
 
     suspend fun updateMessageContent(messageId: String, content: String) {
         val m = db.messages().get(messageId) ?: return
@@ -264,6 +289,23 @@ class Repository private constructor(private val appContext: Context) {
         )
     }
 
+    /** 导演模式：让模型即兴给一个契合当下的突发事件。 */
+    suspend fun improviseEvent(chatId: String): String? {
+        val chat = db.chats().get(chatId) ?: return null
+        val char = db.characters().get(chat.characterId) ?: return null
+        val profile = db.apiProfiles().getActive() ?: return null
+        if (profile.baseUrl.isBlank() || profile.model.isBlank()) return null
+        val persona = chat.personaId?.let { db.personas().get(it) } ?: activePersona()
+        val recent = db.messages().listForChat(chatId).filter { !it.hidden && it.content.isNotBlank() }
+        return maintainer.improviseEvent(
+            profile = profile,
+            charName = char.name,
+            userName = persona?.name?.ifBlank { "对方" } ?: "对方",
+            scene = SceneState.parse(chat.sceneStateJson),
+            recent = recent,
+        )
+    }
+
     suspend fun buildPrompt(
         chatId: String,
         upToIdxExclusive: Long? = null,
@@ -333,7 +375,26 @@ class Repository private constructor(private val appContext: Context) {
             }
         }
 
-        // 2) 长期记忆
+        // 2) 亲密度
+        if (app.affinityEnabled && all.size >= 2) {
+            val cur = db.chats().get(chatId) ?: return
+            runCatching {
+                maintainer.trackAffinity(
+                    profile = profile,
+                    charName = char.name,
+                    userName = userName,
+                    current = cur.affinity,
+                    currentStage = cur.relationshipStage,
+                    recent = all,
+                )
+            }.getOrNull()?.let { (next, stage) ->
+                db.chats().get(chatId)?.let {
+                    db.chats().upsert(it.copy(affinity = next, relationshipStage = stage))
+                }
+            }
+        }
+
+        // 3) 长期记忆
         if (app.memoryEnabled) {
             val current = db.chats().get(chatId) ?: return
             val unscanned = all.filter { it.idx > current.memoryScannedUpToIdx }
@@ -363,7 +424,7 @@ class Repository private constructor(private val appContext: Context) {
             }
         }
 
-        // 3) 归档压缩：只压缩"已经被挤出上下文窗口"的那部分
+        // 4) 归档压缩：只压缩"已经被挤出上下文窗口"的那部分
         if (app.summaryEnabled) {
             val current = db.chats().get(chatId) ?: return
             val built = buildPrompt(chatId)?.first ?: return
