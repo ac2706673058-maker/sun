@@ -12,3 +12,14 @@ murmur-android/build/
 murmur-android/app/build/
 murmur-android/local.properties
 murmur-android/.kotlin/
+
+# Local credentials and signing keys
+.env
+.env.*
+!.env.example
+keystore.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
