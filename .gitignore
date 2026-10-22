@@ -5,3 +5,14 @@ DerivedData/
 xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store
+
+# Local credentials and signing keys
+.env
+.env.*
+!.env.example
+keystore.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
